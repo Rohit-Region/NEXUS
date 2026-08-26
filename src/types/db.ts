@@ -33,3 +33,11 @@ export interface CreateProjectInput {
   repositoryPath?: string;
   repositoryUrl?: string;
 }
+
+export interface UpdateProjectInput {
+  id: number;
+  name: string;
+  description?: string;
+  repositoryPath?: string;
+  repositoryUrl?: string;
+}

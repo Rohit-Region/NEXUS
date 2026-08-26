@@ -1,10 +1,20 @@
-import type { PanelProps } from '../../types';
-import { DbPanel } from '../DbPanel/DbPanel';
+import type { NexusView, PanelProps } from '../../types';
+import { ProjectList } from '../ProjectList/ProjectList';
+import { ProjectDetail } from '../ProjectDetail/ProjectDetail';
 import './Dashboard.css';
 
-type DashboardProps = PanelProps;
+interface DashboardProps extends PanelProps {
+  view: NexusView;
+  navigate: (view: NexusView) => void;
+  onActiveProjectChange: (name: string | null) => void;
+}
 
-export function Dashboard({ className }: DashboardProps) {
+export function Dashboard({
+  className,
+  view,
+  navigate,
+  onActiveProjectChange,
+}: DashboardProps) {
   return (
     <main className={`dashboard${className ? ` ${className}` : ''}`} role="main">
       {/* Background watermark */}
@@ -16,19 +26,15 @@ export function Dashboard({ className }: DashboardProps) {
 
       {/* Scrollable content column */}
       <div className="dashboard__scroll">
-        {/* Welcome content */}
-        <div className="dashboard__content">
-          <h1 className="dashboard__title">
-            NE<span className="accent">X</span>US Command Center
-          </h1>
-          <div className="dashboard__divider" aria-hidden="true" />
-          <p className="dashboard__subtitle">
-            Developer Command Center — v0.1.0
-          </p>
-        </div>
+        {view.screen === 'projects' && <ProjectList navigate={navigate} />}
 
-        {/* NEXUS-002: persistence verification panel */}
-        <DbPanel />
+        {view.screen === 'project-detail' && view.projectId !== undefined && (
+          <ProjectDetail
+            projectId={view.projectId}
+            navigate={navigate}
+            onActiveProjectChange={onActiveProjectChange}
+          />
+        )}
       </div>
     </main>
   );

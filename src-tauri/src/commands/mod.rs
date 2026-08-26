@@ -4,8 +4,8 @@ use tauri::State;
 use crate::db::{
     self,
     projects::{
-        count_all_tables, delete_project, insert_project, list_projects, CreateProjectInput,
-        Project,
+        count_all_tables, delete_project, insert_project, list_projects, update_project,
+        CreateProjectInput, Project, UpdateProjectInput,
     },
     DbState,
 };
@@ -79,6 +79,16 @@ pub fn nexus_create_project(
 ) -> Result<Project, String> {
     let conn = state.0.lock().map_err(|e| format!("Lock error: {e}"))?;
     insert_project(&conn, &input)
+}
+
+/// Update an existing project and return the full updated row.
+#[tauri::command]
+pub fn nexus_update_project(
+    state: State<'_, DbState>,
+    input: UpdateProjectInput,
+) -> Result<Project, String> {
+    let conn = state.0.lock().map_err(|e| format!("Lock error: {e}"))?;
+    update_project(&conn, &input)
 }
 
 /// Return all projects ordered by creation date descending.

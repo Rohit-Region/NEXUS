@@ -97,3 +97,91 @@ input {
   0%, 100% { box-shadow: 0 0 8px 1px rgba(230, 57, 70, 0.3); }
   50%       { box-shadow: 0 0 16px 3px rgba(230, 57, 70, 0.6); }
 }
+
+/* ============================================================
+   NEXUS-003 shared controls
+   Small additive layer so ProjectList / ProjectForm / ProjectDetail
+   share one button + field style. Existing tokens only.
+   ============================================================ */
+.nexus-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  height: 32px;
+  padding: 0 var(--space-md);
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.nexus-btn--primary {
+  background-color: var(--color-accent);
+  border-color: var(--color-accent);
+  color: #fff;
+}
+.nexus-btn--primary:hover:not(:disabled) {
+  background-color: var(--color-accent-dim);
+  border-color: var(--color-accent-dim);
+}
+
+.nexus-btn--secondary {
+  background-color: transparent;
+  border-color: var(--color-border);
+  color: var(--color-text-secondary);
+}
+.nexus-btn--secondary:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  border-color: var(--color-text-secondary);
+}
+
+.nexus-btn--danger {
+  background-color: transparent;
+  border-color: var(--color-accent-dim);
+  color: var(--color-accent);
+}
+.nexus-btn--danger:hover:not(:disabled) {
+  background-color: var(--color-accent);
+  color: #fff;
+}
+
+.nexus-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.nexus-btn:focus-visible {
+  outline: none;
+  border-color: var(--color-border-accent);
+}
+
+.nexus-field {
+  width: 100%;
+  height: 34px;
+  background-color: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-md);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-text-primary);
+  transition: border-color 0.15s ease;
+}
+
+.nexus-field:focus {
+  outline: none;
+  border-color: var(--color-border-accent);
+}
+
+.nexus-field::placeholder {
+  color: var(--color-text-muted);
+}
+
+.nexus-field--invalid {
+  border-color: var(--color-accent);
+}

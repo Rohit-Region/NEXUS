@@ -9,6 +9,7 @@ import type {
   DbCounts,
   DbStatus,
   Project,
+  UpdateProjectInput,
 } from '../types/db';
 
 export function getDbStatus(): Promise<DbStatus> {
@@ -25,6 +26,10 @@ export function createProject(input: CreateProjectInput): Promise<Project> {
 
 export function listProjects(): Promise<Project[]> {
   return invoke<Project[]>('nexus_list_projects');
+}
+
+export function updateProject(input: UpdateProjectInput): Promise<Project> {
+  return invoke<Project>('nexus_update_project', { input });
 }
 
 export function deleteProject(id: number): Promise<void> {

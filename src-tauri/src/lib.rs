@@ -30,6 +30,7 @@ pub fn run() {
             commands::nexus_get_db_counts,
             commands::nexus_create_project,
             commands::nexus_list_projects,
+            commands::nexus_update_project,
             commands::nexus_delete_project,
         ])
         .run(tauri::generate_context!())
