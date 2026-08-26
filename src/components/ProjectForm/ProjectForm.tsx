@@ -1,9 +1,14 @@
 import { useState } from 'react';
 import type { ProjectFormMode, ProjectFormValues } from '../../types';
+import type { RegistryEntry } from '../../types/db';
+import { RegistrySelect } from '../RegistryPanel/RegistrySelect';
 import './ProjectForm.css';
 
 interface ProjectFormProps {
   mode: ProjectFormMode;
+  /** Supplied by the parent; the form itself never calls a command. */
+  ides: RegistryEntry[];
+  agents: RegistryEntry[];
   initialValues?: ProjectFormValues;
   onSubmit: (values: ProjectFormValues) => Promise<void>;
   onCancel: () => void;
@@ -15,6 +20,8 @@ const EMPTY_VALUES: ProjectFormValues = {
   description: '',
   repositoryPath: '',
   repositoryUrl: '',
+  defaultIdeId: null,
+  defaultAgentId: null,
 };
 
 /**
@@ -23,6 +30,8 @@ const EMPTY_VALUES: ProjectFormValues = {
  */
 export function ProjectForm({
   mode,
+  ides,
+  agents,
   initialValues,
   onSubmit,
   onCancel,
@@ -36,7 +45,10 @@ export function ProjectForm({
   const nameIsEmpty = values.name.trim().length === 0;
   const showNameError = touchedName && nameIsEmpty;
 
-  function setField(field: keyof ProjectFormValues, value: string) {
+  function setField<K extends keyof ProjectFormValues>(
+    field: K,
+    value: ProjectFormValues[K],
+  ) {
     setValues((prev) => ({ ...prev, [field]: value }));
   }
 
@@ -126,6 +138,34 @@ export function ProjectForm({
           autoComplete="off"
           spellCheck={false}
         />
+      </div>
+
+      <div className="project-form__row">
+        <div className="project-form__field">
+          <label className="project-form__label" htmlFor="project-form-ide">
+            Default IDE
+          </label>
+          <RegistrySelect
+            id="project-form-ide"
+            entries={ides}
+            value={values.defaultIdeId}
+            onChange={(id) => setField('defaultIdeId', id)}
+            disabled={submitting}
+          />
+        </div>
+
+        <div className="project-form__field">
+          <label className="project-form__label" htmlFor="project-form-agent">
+            Default Agent
+          </label>
+          <RegistrySelect
+            id="project-form-agent"
+            entries={agents}
+            value={values.defaultAgentId}
+            onChange={(id) => setField('defaultAgentId', id)}
+            disabled={submitting}
+          />
+        </div>
       </div>
 
       <div className="project-form__actions">

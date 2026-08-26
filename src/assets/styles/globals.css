@@ -185,3 +185,119 @@ input {
 .nexus-field--invalid {
   border-color: var(--color-accent);
 }
+
+/* ============================================================
+   NEXUS-004 status pill
+   Task status appears in TaskCard, TaskForm and the TaskList
+   header breakdown, so it is defined once. Existing tokens only.
+   ============================================================ */
+.nexus-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  height: 22px;
+  padding: 0 var(--space-sm);
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  background-color: transparent;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  /* Fallback for a status written outside the app, e.g. via sqlite3 */
+  color: var(--color-text-muted);
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.nexus-status-pill--open        { color: var(--color-text-secondary); }
+.nexus-status-pill--in_progress { color: var(--color-accent); }
+.nexus-status-pill--blocked     { color: var(--color-accent-dim); }
+.nexus-status-pill--done        { color: var(--color-status-online); }
+
+/* Interactive variant, used by the TaskCard status control */
+button.nexus-status-pill:hover:not(:disabled) {
+  background-color: currentColor;
+}
+
+button.nexus-status-pill:hover:not(:disabled) .nexus-status-pill__text {
+  color: var(--color-bg-primary);
+}
+
+button.nexus-status-pill:focus-visible {
+  outline: none;
+  border-color: var(--color-border-accent);
+}
+
+button.nexus-status-pill:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Selected state, used by the TaskForm status button group */
+.nexus-status-pill--selected {
+  background-color: currentColor;
+}
+
+.nexus-status-pill--selected .nexus-status-pill__text {
+  color: var(--color-bg-primary);
+}
+
+.nexus-status-pill__text {
+  color: inherit;
+}
+
+/* ============================================================
+   NEXUS-005 select and type chip
+   `globals.css` resets button and input but not select, so a
+   native select would arrive unstyled. Existing tokens only.
+   ============================================================ */
+.nexus-select {
+  height: 30px;
+  max-width: 220px;
+  padding: 0 var(--space-sm);
+  background-color: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.nexus-select:focus {
+  outline: none;
+  border-color: var(--color-border-accent);
+}
+
+.nexus-select:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.nexus-select option {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.nexus-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 var(--space-sm);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.nexus-chip--muted {
+  color: var(--color-text-muted);
+  border-style: dashed;
+}

@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, Pencil, Trash2 } from 'lucide-react';
-import { deleteProject, listProjects, updateProject } from '../../lib/nexus-db';
+import {
+  deleteProject,
+  listAgents,
+  listIdes,
+  listProjects,
+  updateProject,
+} from '../../lib/nexus-db';
 import type { NexusView, ProjectFormValues } from '../../types';
-import type { Project } from '../../types/db';
+import type { Project, RegistryEntry } from '../../types/db';
 import { ProjectForm } from '../ProjectForm/ProjectForm';
 import { formatStamp } from '../ProjectCard/ProjectCard';
+import { TaskList } from '../TaskList/TaskList';
 import './ProjectDetail.css';
 
 interface ProjectDetailProps {
@@ -24,6 +31,8 @@ function toFormValues(project: Project): ProjectFormValues {
     description:    project.description ?? '',
     repositoryPath: project.repositoryPath ?? '',
     repositoryUrl:  project.repositoryUrl ?? '',
+    defaultIdeId:   project.defaultIdeId,
+    defaultAgentId: project.defaultAgentId,
   };
 }
 
@@ -33,19 +42,36 @@ export function ProjectDetail({
   onActiveProjectChange,
 }: ProjectDetailProps) {
   const [project, setProject] = useState<Project | null>(null);
+  // enabledOnly = false: a disabled entry that is still assigned must resolve
+  // to a name here and stay selectable in the edit form (F-15).
+  const [ides, setIdes] = useState<RegistryEntry[]>([]);
+  const [agents, setAgents] = useState<RegistryEntry[]>([]);
   const [mode, setMode] = useState<'view' | 'edit'>('view');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Reported upward by TaskList; ProjectDetail never fetches tasks itself.
+  const [taskCount, setTaskCount] = useState(0);
+
+  const handleTaskCountChange = useCallback((count: number) => {
+    setTaskCount(count);
+  }, []);
 
   // NEXUS-003 adds no single-project command; the list is the source of truth.
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const found = (await listProjects()).find((p) => p.id === projectId);
+      const [projects, ideRows, agentRows] = await Promise.all([
+        listProjects(),
+        listIdes(false),
+        listAgents(false),
+      ]);
+      setIdes(ideRows);
+      setAgents(agentRows);
+      const found = projects.find((p) => p.id === projectId);
       if (!found) {
         setProject(null);
         setError(`Project ${projectId} not found`);
@@ -75,6 +101,8 @@ export function ProjectDetail({
         description: optional(values.description),
         repositoryPath: optional(values.repositoryPath),
         repositoryUrl: optional(values.repositoryUrl),
+        defaultIdeId: values.defaultIdeId,
+        defaultAgentId: values.defaultAgentId,
       });
       setProject(updated);
       onActiveProjectChange(updated.name);
@@ -148,7 +176,11 @@ export function ProjectDetail({
       {confirmDelete && (
         <div className="project-detail__confirm" role="alertdialog" aria-label="Confirm deletion">
           <span className="project-detail__confirm-text">
-            Delete this project? Its tasks are removed with it. This cannot be undone.
+            {taskCount === 0
+              ? 'Delete this project? This cannot be undone.'
+              : taskCount === 1
+                ? 'Delete this project and its 1 task? This cannot be undone.'
+                : `Delete this project and its ${taskCount} tasks? This cannot be undone.`}
           </span>
           <div className="project-detail__confirm-actions">
             <button
@@ -186,15 +218,34 @@ export function ProjectDetail({
           <Field label="Repository Path" value={project.repositoryPath} mono />
           <Field label="Repository URL" value={project.repositoryUrl} mono />
           <div className="project-detail__stamps">
+            <Field
+              label="Default IDE"
+              value={resolveName(ides, project.defaultIdeId)}
+            />
+            <Field
+              label="Default Agent"
+              value={resolveName(agents, project.defaultAgentId)}
+            />
+          </div>
+          <div className="project-detail__stamps">
             <Field label="Created" value={formatStamp(project.createdAt)} />
             <Field label="Updated" value={formatStamp(project.updatedAt)} />
           </div>
         </div>
       )}
 
+      {project && mode === 'view' && (
+        <TaskList
+          projectId={project.id}
+          onCountChange={handleTaskCountChange}
+        />
+      )}
+
       {project && mode === 'edit' && (
         <ProjectForm
           mode="edit"
+          ides={ides}
+          agents={agents}
           initialValues={toFormValues(project)}
           onSubmit={handleSave}
           onCancel={() => setMode('view')}
@@ -203,6 +254,14 @@ export function ProjectDetail({
       )}
     </section>
   );
+}
+
+/** Resolve a registry id to a name, including entries that are now disabled. */
+function resolveName(entries: RegistryEntry[], id: number | null): string | null {
+  if (id === null) return null;
+  const found = entries.find((e) => e.id === id);
+  if (!found) return `Unknown (id ${id})`;
+  return found.enabled ? found.name : `${found.name} (disabled)`;
 }
 
 function Field({

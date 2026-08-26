@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { FolderPlus, Plus, RefreshCw } from 'lucide-react';
-import { createProject, listProjects } from '../../lib/nexus-db';
+import {
+  createProject,
+  listAgents,
+  listIdes,
+  listProjects,
+} from '../../lib/nexus-db';
 import type { NexusView, ProjectFormValues } from '../../types';
-import type { Project } from '../../types/db';
+import type { Project, RegistryEntry } from '../../types/db';
 import { ProjectCard } from '../ProjectCard/ProjectCard';
 import { ProjectForm } from '../ProjectForm/ProjectForm';
 import './ProjectList.css';
@@ -19,6 +24,9 @@ function optional(value: string): string | undefined {
 
 export function ProjectList({ navigate }: ProjectListProps) {
   const [projects, setProjects] = useState<Project[]>([]);
+  // Create has no pre-existing assignment, so enabled-only is the right set.
+  const [ides, setIdes] = useState<RegistryEntry[]>([]);
+  const [agents, setAgents] = useState<RegistryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -28,7 +36,14 @@ export function ProjectList({ navigate }: ProjectListProps) {
     setLoading(true);
     setError(null);
     try {
-      setProjects(await listProjects());
+      const [rows, ideRows, agentRows] = await Promise.all([
+        listProjects(),
+        listIdes(true),
+        listAgents(true),
+      ]);
+      setProjects(rows);
+      setIdes(ideRows);
+      setAgents(agentRows);
     } catch (err) {
       setError(String(err));
     } finally {
@@ -49,6 +64,8 @@ export function ProjectList({ navigate }: ProjectListProps) {
         description: optional(values.description),
         repositoryPath: optional(values.repositoryPath),
         repositoryUrl: optional(values.repositoryUrl),
+        defaultIdeId: values.defaultIdeId,
+        defaultAgentId: values.defaultAgentId,
       });
       setShowCreateForm(false);
       await refresh();
@@ -97,6 +114,8 @@ export function ProjectList({ navigate }: ProjectListProps) {
       {showCreateForm && (
         <ProjectForm
           mode="create"
+          ides={ides}
+          agents={agents}
           onSubmit={handleCreate}
           onCancel={() => setShowCreateForm(false)}
           submitting={submitting}

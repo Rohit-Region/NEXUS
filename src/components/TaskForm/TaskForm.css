@@ -1,14 +1,14 @@
-.project-form {
+.task-form {
   display: flex;
   flex-direction: column;
   gap: var(--space-md);
-  background-color: var(--color-bg-secondary);
+  background-color: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   padding: var(--space-md);
 }
 
-.project-form__heading {
+.task-form__heading {
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 600;
@@ -19,45 +19,47 @@
   padding-bottom: var(--space-xs);
 }
 
-.project-form__field {
+.task-form__field {
   display: flex;
   flex-direction: column;
   gap: var(--space-xs);
 }
 
-.project-form__label {
+.task-form__fieldset {
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+.task-form__label {
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 0.15em;
   text-transform: uppercase;
   color: var(--color-text-secondary);
+  padding: 0;
 }
 
-.project-form__required {
+.task-form__required {
   color: var(--color-accent);
 }
 
-.project-form__error {
+.task-form__status-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  padding-top: var(--space-xs);
+}
+
+.task-form__error {
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--color-accent);
 }
 
-.project-form__actions {
+.task-form__actions {
   display: flex;
   justify-content: flex-end;
   gap: var(--space-sm);
   padding-top: var(--space-xs);
-}
-
-/* NEXUS-005: side-by-side registry selects */
-.project-form__row {
-  display: flex;
-  gap: var(--space-md);
-  flex-wrap: wrap;
-}
-
-.project-form__row .project-form__field {
-  flex: 1;
-  min-width: 180px;
 }

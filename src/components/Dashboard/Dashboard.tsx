@@ -1,6 +1,7 @@
 import type { NexusView, PanelProps } from '../../types';
 import { ProjectList } from '../ProjectList/ProjectList';
 import { ProjectDetail } from '../ProjectDetail/ProjectDetail';
+import { RegistryScreen } from '../RegistryScreen/RegistryScreen';
 import './Dashboard.css';
 
 interface DashboardProps extends PanelProps {
@@ -35,6 +36,8 @@ export function Dashboard({
             onActiveProjectChange={onActiveProjectChange}
           />
         )}
+
+        {view.screen === 'registry' && <RegistryScreen />}
       </div>
     </main>
   );

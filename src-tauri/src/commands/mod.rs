@@ -3,9 +3,16 @@ use tauri::State;
 
 use crate::db::{
     self,
+    agents::{delete_agent, insert_agent, list_agents, update_agent},
+    ides::{delete_ide, insert_ide, list_ides, update_ide},
     projects::{
         count_all_tables, delete_project, insert_project, list_projects, update_project,
         CreateProjectInput, Project, UpdateProjectInput,
+    },
+    registry::{CreateRegistryEntryInput, RegistryEntry, UpdateRegistryEntryInput},
+    tasks::{
+        assign_task_agent, delete_task, insert_task, list_tasks, update_task, update_task_status,
+        AssignTaskAgentInput, CreateTaskInput, Task, UpdateTaskInput, UpdateTaskStatusInput,
     },
     DbState,
 };
@@ -103,4 +110,140 @@ pub fn nexus_list_projects(state: State<'_, DbState>) -> Result<Vec<Project>, St
 pub fn nexus_delete_project(state: State<'_, DbState>, id: i64) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| format!("Lock error: {e}"))?;
     delete_project(&conn, id)
+}
+
+// -- Task commands -----------------------------------------------------------
+
+/// Insert a new task for a project and return the full row.
+#[tauri::command]
+pub fn nexus_create_task(
+    state: State<'_, DbState>,
+    input: CreateTaskInput,
+) -> Result<Task, String> {
+    let conn = state.0.lock().map_err(|e| format!("Lock error: {e}"))?;
+    insert_task(&conn, &input)
+}
+
+/// Return all tasks for one project, newest first.
+#[tauri::command]
+pub fn nexus_list_tasks(
+    state: State<'_, DbState>,
+    project_id: i64,
+) -> Result<Vec<Task>, String> {
+    let conn = state.0.lock().map_err(|e| format!("Lock error: {e}"))?;
+    list_tasks(&conn, project_id)
+}
+
+/// Update a task's title, description and status, and return the full row.
+#[tauri::command]
+pub fn nexus_update_task(
+    state: State<'_, DbState>,
+    input: UpdateTaskInput,
+) -> Result<Task, String> {
+    let conn = state.0.lock().map_err(|e| format!("Lock error: {e}"))?;
+    update_task(&conn, &input)
+}
+
+/// Change a task's status only, and return the full row.
+#[tauri::command]
+pub fn nexus_update_task_status(
+    state: State<'_, DbState>,
+    input: UpdateTaskStatusInput,
+) -> Result<Task, String> {
+    let conn = state.0.lock().map_err(|e| format!("Lock error: {e}"))?;
+    update_task_status(&conn, &input)
+}
+
+/// Delete a task by ID.
+#[tauri::command]
+pub fn nexus_delete_task(state: State<'_, DbState>, id: i64) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| format!("Lock error: {e}"))?;
+    delete_task(&conn, id)
+}
+
+// -- Registry commands -------------------------------------------------------
+
+/// Register a new IDE and return the full row.
+#[tauri::command]
+pub fn nexus_create_ide(
+    state: State<'_, DbState>,
+    input: CreateRegistryEntryInput,
+) -> Result<RegistryEntry, String> {
+    let conn = state.0.lock().map_err(|e| format!("Lock error: {e}"))?;
+    insert_ide(&conn, &input)
+}
+
+/// Return registered IDEs. `enabled_only` filters out disabled entries.
+#[tauri::command]
+pub fn nexus_list_ides(
+    state: State<'_, DbState>,
+    enabled_only: bool,
+) -> Result<Vec<RegistryEntry>, String> {
+    let conn = state.0.lock().map_err(|e| format!("Lock error: {e}"))?;
+    list_ides(&conn, enabled_only)
+}
+
+/// Update an IDE and return the full updated row.
+#[tauri::command]
+pub fn nexus_update_ide(
+    state: State<'_, DbState>,
+    input: UpdateRegistryEntryInput,
+) -> Result<RegistryEntry, String> {
+    let conn = state.0.lock().map_err(|e| format!("Lock error: {e}"))?;
+    update_ide(&conn, &input)
+}
+
+/// Delete an IDE by ID. Referring projects are blanked by ON DELETE SET NULL.
+#[tauri::command]
+pub fn nexus_delete_ide(state: State<'_, DbState>, id: i64) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| format!("Lock error: {e}"))?;
+    delete_ide(&conn, id)
+}
+
+/// Register a new AI agent and return the full row.
+#[tauri::command]
+pub fn nexus_create_agent(
+    state: State<'_, DbState>,
+    input: CreateRegistryEntryInput,
+) -> Result<RegistryEntry, String> {
+    let conn = state.0.lock().map_err(|e| format!("Lock error: {e}"))?;
+    insert_agent(&conn, &input)
+}
+
+/// Return registered agents. `enabled_only` filters out disabled entries.
+#[tauri::command]
+pub fn nexus_list_agents(
+    state: State<'_, DbState>,
+    enabled_only: bool,
+) -> Result<Vec<RegistryEntry>, String> {
+    let conn = state.0.lock().map_err(|e| format!("Lock error: {e}"))?;
+    list_agents(&conn, enabled_only)
+}
+
+/// Update an agent and return the full updated row.
+#[tauri::command]
+pub fn nexus_update_agent(
+    state: State<'_, DbState>,
+    input: UpdateRegistryEntryInput,
+) -> Result<RegistryEntry, String> {
+    let conn = state.0.lock().map_err(|e| format!("Lock error: {e}"))?;
+    update_agent(&conn, &input)
+}
+
+/// Delete an agent by ID. Referring projects and tasks are blanked by SET NULL.
+#[tauri::command]
+pub fn nexus_delete_agent(state: State<'_, DbState>, id: i64) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| format!("Lock error: {e}"))?;
+    delete_agent(&conn, id)
+}
+
+/// Assign an agent to a task, or clear the assignment with a null agentId.
+/// Narrow by design so `nexus_update_task` never writes this column (spec 2.5).
+#[tauri::command]
+pub fn nexus_assign_task_agent(
+    state: State<'_, DbState>,
+    input: AssignTaskAgentInput,
+) -> Result<Task, String> {
+    let conn = state.0.lock().map_err(|e| format!("Lock error: {e}"))?;
+    assign_task_agent(&conn, &input)
 }

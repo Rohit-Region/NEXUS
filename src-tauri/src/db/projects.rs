@@ -24,6 +24,8 @@ pub struct CreateProjectInput {
     pub description: Option<String>,
     pub repository_path: Option<String>,
     pub repository_url: Option<String>,
+    pub default_ide_id: Option<i64>,
+    pub default_agent_id: Option<i64>,
 }
 
 /// Input for updating an existing project (from React).
@@ -35,6 +37,8 @@ pub struct UpdateProjectInput {
     pub description: Option<String>,
     pub repository_path: Option<String>,
     pub repository_url: Option<String>,
+    pub default_ide_id: Option<i64>,
+    pub default_agent_id: Option<i64>,
 }
 
 /// Insert a new project and return the full row.
@@ -43,13 +47,16 @@ pub fn insert_project(
     input: &CreateProjectInput,
 ) -> Result<Project, String> {
     conn.execute(
-        "INSERT INTO projects (name, description, repository_path, repository_url)
-         VALUES (?1, ?2, ?3, ?4)",
+        "INSERT INTO projects (name, description, repository_path, repository_url,
+                               default_ide_id, default_agent_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         rusqlite::params![
             input.name,
             input.description,
             input.repository_path,
             input.repository_url,
+            input.default_ide_id,
+            input.default_agent_id,
         ],
     )
     .map_err(|e| format!("Failed to insert project: {e}"))?;
@@ -92,17 +99,21 @@ pub fn update_project(
     let affected = conn
         .execute(
             "UPDATE projects
-                SET name            = ?1,
-                    description     = ?2,
-                    repository_path = ?3,
-                    repository_url  = ?4,
-                    updated_at      = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-              WHERE id = ?5",
+                SET name             = ?1,
+                    description      = ?2,
+                    repository_path  = ?3,
+                    repository_url   = ?4,
+                    default_ide_id   = ?5,
+                    default_agent_id = ?6,
+                    updated_at       = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+              WHERE id = ?7",
             rusqlite::params![
                 name,
                 input.description,
                 input.repository_path,
                 input.repository_url,
+                input.default_ide_id,
+                input.default_agent_id,
                 input.id,
             ],
         )
@@ -220,6 +231,8 @@ mod tests {
                 description: Some("initial description".to_string()),
                 repository_path: Some("/tmp/initial".to_string()),
                 repository_url: None,
+                default_ide_id: None,
+                default_agent_id: None,
             },
         )
         .expect("insert project")
@@ -229,6 +242,20 @@ mod tests {
     fn update_project_changes_fields_and_updated_at() {
         let conn = test_conn();
         let created = seed_project(&conn, "Original");
+
+        // NEXUS-005: the update now also carries the two registry defaults.
+        conn.execute(
+            "INSERT INTO ides (name, ide_type) VALUES ('Test IDE', 'editor')",
+            [],
+        )
+        .expect("insert ide");
+        let ide_id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO ai_agents (name, agent_type) VALUES ('Test Agent', 'assistant')",
+            [],
+        )
+        .expect("insert agent");
+        let agent_id = conn.last_insert_rowid();
 
         // Force a distinct timestamp; strftime('%f') has millisecond resolution.
         std::thread::sleep(std::time::Duration::from_millis(5));
@@ -241,9 +268,14 @@ mod tests {
                 description: Some("new description".to_string()),
                 repository_path: None,
                 repository_url: Some("https://example.com/repo".to_string()),
+                default_ide_id: Some(ide_id),
+                default_agent_id: Some(agent_id),
             },
         )
         .expect("update project");
+
+        assert_eq!(updated.default_ide_id, Some(ide_id));
+        assert_eq!(updated.default_agent_id, Some(agent_id));
 
         assert_eq!(updated.id, created.id);
         assert_eq!(updated.name, "Renamed");
@@ -282,6 +314,8 @@ mod tests {
                 description: None,
                 repository_path: None,
                 repository_url: None,
+                default_ide_id: None,
+                default_agent_id: None,
             },
         )
         .expect_err("empty name must be rejected");
@@ -304,6 +338,8 @@ mod tests {
                 description: None,
                 repository_path: None,
                 repository_url: None,
+                default_ide_id: None,
+                default_agent_id: None,
             },
         )
         .expect_err("unknown id must be rejected");
@@ -366,6 +402,8 @@ mod tests {
                 description: None,
                 repository_path: None,
                 repository_url: None,
+                default_ide_id: None,
+                default_agent_id: None,
             },
         )
         .expect("update B");
@@ -376,5 +414,78 @@ mod tests {
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].id, b.id);
         assert_eq!(remaining[0].name, "B renamed");
+    }
+
+    #[test]
+    fn insert_and_update_project_carry_defaults() {
+        let conn = test_conn();
+        conn.execute("INSERT INTO ides (name, ide_type) VALUES ('I', 'editor')", [])
+            .expect("insert ide");
+        let ide_id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO ai_agents (name, agent_type) VALUES ('A', 'assistant')",
+            [],
+        )
+        .expect("insert agent");
+        let agent_id = conn.last_insert_rowid();
+
+        let created = insert_project(
+            &conn,
+            &CreateProjectInput {
+                name: "With defaults".to_string(),
+                description: None,
+                repository_path: None,
+                repository_url: None,
+                default_ide_id: Some(ide_id),
+                default_agent_id: Some(agent_id),
+            },
+        )
+        .expect("insert project");
+
+        assert_eq!(created.default_ide_id, Some(ide_id));
+        assert_eq!(created.default_agent_id, Some(agent_id));
+
+        // Both must be clearable back to NULL through update.
+        let cleared = update_project(
+            &conn,
+            &UpdateProjectInput {
+                id: created.id,
+                name: created.name.clone(),
+                description: None,
+                repository_path: None,
+                repository_url: None,
+                default_ide_id: None,
+                default_agent_id: None,
+            },
+        )
+        .expect("update project");
+
+        assert_eq!(cleared.default_ide_id, None);
+        assert_eq!(cleared.default_agent_id, None);
+    }
+
+    #[test]
+    fn update_project_rejects_unknown_ide() {
+        let conn = test_conn();
+        let created = seed_project(&conn, "P");
+
+        let err = update_project(
+            &conn,
+            &UpdateProjectInput {
+                id: created.id,
+                name: "P".to_string(),
+                description: None,
+                repository_path: None,
+                repository_url: None,
+                default_ide_id: Some(9999),
+                default_agent_id: None,
+            },
+        )
+        .expect_err("dangling default_ide_id must be rejected");
+
+        assert!(
+            err.contains("FOREIGN KEY constraint failed"),
+            "unexpected error: {err}"
+        );
     }
 }

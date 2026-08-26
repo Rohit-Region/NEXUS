@@ -1,5 +1,9 @@
+pub mod agents;
+pub mod ides;
 pub mod migrations;
 pub mod projects;
+pub mod registry;
+pub mod tasks;
 
 use rusqlite::Connection;
 use std::sync::Mutex;

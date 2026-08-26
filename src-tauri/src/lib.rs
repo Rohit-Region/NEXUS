@@ -32,6 +32,20 @@ pub fn run() {
             commands::nexus_list_projects,
             commands::nexus_update_project,
             commands::nexus_delete_project,
+            commands::nexus_create_task,
+            commands::nexus_list_tasks,
+            commands::nexus_update_task,
+            commands::nexus_update_task_status,
+            commands::nexus_delete_task,
+            commands::nexus_create_ide,
+            commands::nexus_list_ides,
+            commands::nexus_update_ide,
+            commands::nexus_delete_ide,
+            commands::nexus_create_agent,
+            commands::nexus_list_agents,
+            commands::nexus_update_agent,
+            commands::nexus_delete_agent,
+            commands::nexus_assign_task_agent,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

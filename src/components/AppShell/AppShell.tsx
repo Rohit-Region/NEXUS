@@ -15,7 +15,7 @@ export function AppShell() {
   const [activeProjectName, setActiveProjectName] = useState<string | null>(null);
 
   const navigate = useCallback((next: NexusView) => {
-    if (next.screen === 'projects') {
+    if (next.screen !== 'project-detail') {
       setActiveProjectName(null);
     }
     setView(next);
@@ -25,12 +25,33 @@ export function AppShell() {
     setActiveProjectName(name);
   }, []);
 
+  const onProjects =
+    view.screen === 'projects' || view.screen === 'project-detail';
   const showBadge = view.screen === 'project-detail' && activeProjectName !== null;
 
   return (
     <div className="app-shell">
       <header className="app-shell__header">
         <Logo />
+
+        <nav className="app-shell__nav" aria-label="Primary">
+          <button
+            className="app-shell__nav-btn"
+            type="button"
+            onClick={() => navigate({ screen: 'projects' })}
+            aria-current={onProjects ? 'page' : undefined}
+          >
+            Projects
+          </button>
+          <button
+            className="app-shell__nav-btn"
+            type="button"
+            onClick={() => navigate({ screen: 'registry' })}
+            aria-current={view.screen === 'registry' ? 'page' : undefined}
+          >
+            Registry
+          </button>
+        </nav>
 
         {showBadge && (
           <span className="app-shell__project-badge" title={activeProjectName ?? undefined}>

@@ -1,0 +1,31 @@
+.registry-screen {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.registry-screen__header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.registry-screen__title {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--color-text-primary);
+}
+
+.registry-screen__subtitle {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  max-width: 560px;
+}

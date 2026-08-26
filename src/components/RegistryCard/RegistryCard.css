@@ -1,0 +1,103 @@
+.registry-card {
+  display: flex;
+  flex-direction: column;
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+/* Disabled entries stay fully legible and fully interactive */
+.registry-card--disabled .registry-card__name,
+.registry-card--disabled .registry-card__path {
+  color: var(--color-text-secondary);
+}
+
+.registry-card__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+}
+
+.registry-card__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  overflow: hidden;
+}
+
+.registry-card__headline {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.registry-card__name {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+/* Truncate from the left so the binary name stays visible */
+.registry-card__path {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-muted);
+  direction: rtl;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.registry-card__date {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.registry-card__actions {
+  display: flex;
+  gap: var(--space-xs);
+  flex-shrink: 0;
+}
+
+.registry-card__icon-btn {
+  height: 26px;
+  padding: 0 var(--space-sm);
+}
+
+.registry-card__confirm {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  background-color: rgba(230, 57, 70, 0.08);
+  border-top: 1px solid var(--color-accent-dim);
+  padding: var(--space-sm) var(--space-md);
+}
+
+.registry-card__confirm-text {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-primary);
+}
+
+.registry-card__confirm-actions {
+  display: flex;
+  gap: var(--space-sm);
+  flex-shrink: 0;
+}
+
+.registry-card__edit {
+  border-top: 1px solid var(--color-border);
+  padding: var(--space-md);
+}

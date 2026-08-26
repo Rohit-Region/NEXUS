@@ -65,3 +65,40 @@
   text-transform: uppercase;
   color: var(--color-text-muted);
 }
+
+/* NEXUS-005: primary screen navigation */
+.app-shell__nav {
+  display: flex;
+  gap: var(--space-xs);
+  margin-right: auto;
+  margin-left: var(--space-lg);
+}
+
+.app-shell__nav-btn {
+  height: 26px;
+  padding: 0 var(--space-md);
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.app-shell__nav-btn:hover {
+  color: var(--color-text-primary);
+}
+
+.app-shell__nav-btn[aria-current='page'] {
+  color: var(--color-text-primary);
+  border-color: var(--color-accent-dim);
+  background-color: var(--color-bg-tertiary);
+}
+
+.app-shell__nav-btn:focus-visible {
+  outline: none;
+  border-color: var(--color-border-accent);
+}

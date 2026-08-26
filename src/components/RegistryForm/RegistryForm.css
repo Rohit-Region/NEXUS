@@ -1,14 +1,14 @@
-.project-form {
+.registry-form {
   display: flex;
   flex-direction: column;
   gap: var(--space-md);
-  background-color: var(--color-bg-secondary);
+  background-color: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   padding: var(--space-md);
 }
 
-.project-form__heading {
+.registry-form__heading {
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 600;
@@ -19,13 +19,13 @@
   padding-bottom: var(--space-xs);
 }
 
-.project-form__field {
+.registry-form__field {
   display: flex;
   flex-direction: column;
   gap: var(--space-xs);
 }
 
-.project-form__label {
+.registry-form__label {
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 0.15em;
@@ -33,31 +33,38 @@
   color: var(--color-text-secondary);
 }
 
-.project-form__required {
+.registry-form__required {
   color: var(--color-accent);
 }
 
-.project-form__error {
+.registry-form__hint {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+
+.registry-form__error {
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--color-accent);
 }
 
-.project-form__actions {
+.registry-form__toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  cursor: pointer;
+}
+
+.registry-form__toggle-text {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.registry-form__actions {
   display: flex;
   justify-content: flex-end;
   gap: var(--space-sm);
   padding-top: var(--space-xs);
-}
-
-/* NEXUS-005: side-by-side registry selects */
-.project-form__row {
-  display: flex;
-  gap: var(--space-md);
-  flex-wrap: wrap;
-}
-
-.project-form__row .project-form__field {
-  flex: 1;
-  min-width: 180px;
 }
