@@ -1,0 +1,74 @@
+.command-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-lg);
+  background-color: var(--color-bg-secondary);
+  border-top: 1px solid var(--color-border);
+}
+
+.command-bar__input-wrapper {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  background-color: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 0 var(--space-md);
+  height: 44px;
+  gap: var(--space-sm);
+  transition: border-color 0.15s ease;
+}
+
+.command-bar__input-wrapper:focus-within {
+  border-color: var(--color-border-accent);
+}
+
+.command-bar__prefix {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--color-accent);
+  font-weight: 600;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.command-bar__input {
+  flex: 1;
+  height: 100%;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--color-text-primary);
+  background: transparent;
+  caret-color: var(--color-accent);
+}
+
+.command-bar__input::placeholder {
+  color: var(--color-text-muted);
+}
+
+/* Mic button */
+.command-bar__mic-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+  transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.command-bar__mic-btn:hover {
+  color: var(--color-accent);
+  border-color: var(--color-accent-dim);
+  background-color: var(--color-bg-secondary);
+}
+
+.command-bar__mic-btn:active {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-accent);
+}

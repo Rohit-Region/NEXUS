@@ -1,0 +1,99 @@
+/* ============================================================
+   NEXUS Design Tokens
+   ============================================================ */
+:root {
+  /* Backgrounds */
+  --color-bg-primary:    #0a0a0a;
+  --color-bg-secondary:  #111111;
+  --color-bg-tertiary:   #1a1a1a;
+
+  /* Accent */
+  --color-accent:        #e63946;
+  --color-accent-dim:    #991b22;
+
+  /* Text */
+  --color-text-primary:   #f5f5f5;
+  --color-text-secondary: #888888;
+  --color-text-muted:     #444444;
+
+  /* Borders */
+  --color-border:        #222222;
+  --color-border-accent: #e63946;
+
+  /* Status */
+  --color-status-online: #22c55e;
+
+  /* Typography — native system monospace stack, no download */
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* Border radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  /* Spacing */
+  --space-xs:  4px;
+  --space-sm:  8px;
+  --space-md:  16px;
+  --space-lg:  24px;
+  --space-xl:  40px;
+
+  /* Z-layers */
+  --z-base:    0;
+  --z-overlay: 10;
+}
+
+/* ============================================================
+   Reset
+   ============================================================ */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Remove default button and input styles */
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: inherit;
+}
+
+input {
+  font-family: inherit;
+  border: none;
+  outline: none;
+  background: none;
+  color: inherit;
+}
+
+/* ============================================================
+   Pulse animation — used by StatusBar online indicator
+   ============================================================ */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.5; transform: scale(0.85); }
+}
+
+@keyframes accent-glow {
+  0%, 100% { box-shadow: 0 0 8px 1px rgba(230, 57, 70, 0.3); }
+  50%       { box-shadow: 0 0 16px 3px rgba(230, 57, 70, 0.6); }
+}

@@ -1,0 +1,33 @@
+.logo {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  user-select: none;
+  text-decoration: none;
+}
+
+.logo__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1.5px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.logo__wordmark {
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--color-text-primary);
+  line-height: 1;
+}
+
+.logo__wordmark .accent {
+  color: var(--color-accent);
+}

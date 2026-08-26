@@ -1,0 +1,33 @@
+# ── Node / pnpm ───────────────────────────────────────────────────────────────
+node_modules/
+.pnpm-debug.log*
+
+# ── Vite build output ─────────────────────────────────────────────────────────
+dist/
+dist-ssr/
+
+# ── Tauri / Rust build artifacts ──────────────────────────────────────────────
+src-tauri/target/
+
+# ── SQLite databases ──────────────────────────────────────────────────────────
+# The production DB lives in ~/Library/Application Support — but guard against
+# any accidental .db files appearing in the project directory.
+*.db
+*.db-shm
+*.db-wal
+
+# ── macOS system files ────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ── Editor / IDE ──────────────────────────────────────────────────────────────
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# ── Environment / secrets ─────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
