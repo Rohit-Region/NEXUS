@@ -82,6 +82,12 @@ interface TaskCardProps {
   onAgentChange: (agentId: number | null) => void;
   isEditing: boolean;
   isConfirmingDelete: boolean;
+  /**
+   * NEXUS-012: the sentence the action gate rendered for this deletion, and
+   * the one the approval token is bound to. Falls back to the generic wording
+   * when a caller confirms without going through the gate.
+   */
+  confirmSummary?: string;
   busy: boolean;
   onStatusChange: (status: TaskStatus) => void;
   onEditToggle: () => void;
@@ -102,6 +108,7 @@ export function TaskCard({
   onAgentChange,
   isEditing,
   isConfirmingDelete,
+  confirmSummary,
   busy,
   onStatusChange,
   onEditToggle,
@@ -177,7 +184,9 @@ export function TaskCard({
           aria-label={`Confirm deletion of ${task.title}`}
         >
           <span className="task-card__confirm-text">
-            Delete this task? This cannot be undone.
+            {confirmSummary
+              ? `${confirmSummary}? This cannot be undone.`
+              : 'Delete this task? This cannot be undone.'}
           </span>
           <div className="task-card__confirm-actions">
             <button

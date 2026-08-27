@@ -301,3 +301,70 @@ button.nexus-status-pill:disabled {
   color: var(--color-text-muted);
   border-style: dashed;
 }
+
+/* ============================================================
+   NEXUS-007 filter bar, hidden-result notice, no-results block
+   Append-only. Existing tokens only.
+   ============================================================ */
+.nexus-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex-wrap: wrap;
+}
+
+/*
+   Reports a successful outcome that is not visible, so role="status".
+   role="alert" stays reserved for errors.
+*/
+.nexus-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  background-color: rgba(230, 57, 70, 0.06);
+  border: 1px solid var(--color-accent-dim);
+  border-left: 2px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm) var(--space-md);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-primary);
+}
+
+.nexus-notice__actions {
+  display: flex;
+  gap: var(--space-sm);
+  flex-shrink: 0;
+}
+
+.nexus-no-results {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-xs);
+  text-align: center;
+  padding: var(--space-lg) var(--space-md);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+}
+
+.nexus-no-results__title {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-text-primary);
+}
+
+.nexus-no-results__text {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.nexus-no-results .nexus-btn {
+  margin-top: var(--space-sm);
+}

@@ -1,23 +1,34 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, Pencil, Trash2 } from 'lucide-react';
 import {
-  deleteProject,
   listAgents,
   listIdes,
   listProjects,
   updateProject,
 } from '../../lib/nexus-db';
-import type { NexusView, ProjectFormValues } from '../../types';
-import type { Project, RegistryEntry } from '../../types/db';
+import type { NexusIntent, NexusView, ProjectFormValues } from '../../types';
+import type { Project, RegistryEntry, Settings } from '../../types/db';
 import { ProjectForm } from '../ProjectForm/ProjectForm';
 import { formatStamp } from '../ProjectCard/ProjectCard';
 import { TaskList } from '../TaskList/TaskList';
+import {
+  cancelApproval,
+  describeActionError,
+  isActionError,
+  isNeedsApproval,
+  runAction,
+} from '../../lib/assistant';
+import type { NeedsApproval } from '../../types/assistant';
+import { ApprovalPrompt } from '../ApprovalPrompt/ApprovalPrompt';
 import './ProjectDetail.css';
 
 interface ProjectDetailProps {
   projectId: number;
   navigate: (view: NexusView) => void;
   onActiveProjectChange: (name: string | null) => void;
+  /** Pass-through only: forwarded to TaskList, no logic of its own. */
+  settings: Settings;
+  intent?: NexusIntent;
 }
 
 function optional(value: string): string | undefined {
@@ -40,6 +51,8 @@ export function ProjectDetail({
   projectId,
   navigate,
   onActiveProjectChange,
+  settings,
+  intent,
 }: ProjectDetailProps) {
   const [project, setProject] = useState<Project | null>(null);
   // enabledOnly = false: a disabled entry that is still assigned must resolve
@@ -50,15 +63,12 @@ export function ProjectDetail({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  // NEXUS-012: deletion goes through the action gate, so `pendingDelete`
+  // holds a real approval token rather than a local boolean. The prompt's
+  // wording comes from Rust, which is what binds the sentence the user reads
+  // to the action the token authorises.
+  const [pendingDelete, setPendingDelete] = useState<NeedsApproval | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Reported upward by TaskList; ProjectDetail never fetches tasks itself.
-  const [taskCount, setTaskCount] = useState(0);
-
-  const handleTaskCountChange = useCallback((count: number) => {
-    setTaskCount(count);
-  }, []);
-
   // NEXUS-003 adds no single-project command; the list is the source of truth.
   const load = useCallback(async () => {
     setLoading(true);
@@ -114,17 +124,42 @@ export function ProjectDetail({
     }
   }
 
-  async function handleDelete() {
+  /** Ask the gate. It answers with a prompt, never by deleting. */
+  async function requestDelete() {
+    setError(null);
+    try {
+      await runAction({ actionId: 'nexus.delete_project', input: { id: projectId } });
+      // Unreachable while delete_project is Destructive: the gate must ask
+      // before it acts. Treated as a failure rather than a success, because a
+      // silent deletion is exactly what this milestone exists to prevent.
+      setError('NEXUS deleted the project without asking. Please report this.');
+    } catch (err) {
+      if (isNeedsApproval(err)) {
+        setPendingDelete(err);
+      } else if (isActionError(err)) {
+        setError(describeActionError(err));
+      } else {
+        setError(String(err));
+      }
+    }
+  }
+
+  async function confirmDelete(approval: number) {
     setDeleting(true);
     setError(null);
     try {
-      await deleteProject(projectId);
+      await runAction({
+        actionId: 'nexus.delete_project',
+        input: { id: projectId },
+        approval,
+      });
+      setPendingDelete(null);
       onActiveProjectChange(null);
       navigate({ screen: 'projects' });
     } catch (err) {
-      setError(String(err));
+      setError(isActionError(err) ? describeActionError(err) : String(err));
       setDeleting(false);
-      setConfirmDelete(false);
+      setPendingDelete(null);
     }
   }
 
@@ -149,7 +184,7 @@ export function ProjectDetail({
             className="nexus-btn nexus-btn--secondary"
             type="button"
             onClick={() => {
-              setConfirmDelete(false);
+              setPendingDelete(null);
               setMode((prev) => (prev === 'edit' ? 'view' : 'edit'));
             }}
             disabled={!project || deleting}
@@ -163,9 +198,9 @@ export function ProjectDetail({
             type="button"
             onClick={() => {
               setMode('view');
-              setConfirmDelete(true);
+              void requestDelete();
             }}
-            disabled={!project || deleting || confirmDelete}
+            disabled={!project || deleting || pendingDelete !== null}
           >
             <Trash2 size={12} strokeWidth={2} aria-hidden="true" />
             Delete
@@ -173,33 +208,17 @@ export function ProjectDetail({
         </div>
       </div>
 
-      {confirmDelete && (
-        <div className="project-detail__confirm" role="alertdialog" aria-label="Confirm deletion">
-          <span className="project-detail__confirm-text">
-            {taskCount === 0
-              ? 'Delete this project? This cannot be undone.'
-              : taskCount === 1
-                ? 'Delete this project and its 1 task? This cannot be undone.'
-                : `Delete this project and its ${taskCount} tasks? This cannot be undone.`}
-          </span>
-          <div className="project-detail__confirm-actions">
-            <button
-              className="nexus-btn nexus-btn--secondary"
-              type="button"
-              onClick={() => setConfirmDelete(false)}
-              disabled={deleting}
-            >
-              Cancel
-            </button>
-            <button
-              className="nexus-btn nexus-btn--primary"
-              type="button"
-              onClick={() => void handleDelete()}
-              disabled={deleting}
-            >
-              {deleting ? 'Deleting...' : 'Confirm Delete'}
-            </button>
-          </div>
+      {pendingDelete && (
+        <div className="project-detail__confirm">
+          <ApprovalPrompt
+            request={pendingDelete}
+            busy={deleting}
+            onApprove={() => void confirmDelete(pendingDelete.token)}
+            onCancel={() => {
+              void cancelApproval(pendingDelete.token);
+              setPendingDelete(null);
+            }}
+          />
         </div>
       )}
 
@@ -237,7 +256,8 @@ export function ProjectDetail({
       {project && mode === 'view' && (
         <TaskList
           projectId={project.id}
-          onCountChange={handleTaskCountChange}
+          settings={settings}
+          intent={intent}
         />
       )}
 

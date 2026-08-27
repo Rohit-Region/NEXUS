@@ -1,0 +1,170 @@
+/* NEXUS-012: permissions and the audit trail. */
+
+.permissions-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding-top: var(--space-lg);
+  margin-top: var(--space-lg);
+  border-top: 1px solid var(--color-border);
+}
+
+.permissions-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+.permissions-panel__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+.permissions-panel__title--sub {
+  margin-top: var(--space-lg);
+}
+
+.permissions-panel__intro,
+.permissions-panel__status {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  max-width: 68ch;
+}
+
+.permissions-panel__error {
+  margin: 0;
+  font-size: 11px;
+  color: var(--color-accent);
+}
+
+.permissions-panel__connector {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-bg-tertiary);
+}
+
+.permissions-panel__connector-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.permissions-panel__connector-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.permissions-panel__count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+
+.permissions-panel__switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.permissions-panel__grants {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.permissions-panel__grant {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: var(--space-sm);
+  align-items: baseline;
+}
+
+.permissions-panel__grant .permissions-panel__switch {
+  margin-left: 0;
+}
+
+.permissions-panel__grant-label {
+  font-size: 12px;
+  color: var(--color-text-primary);
+}
+
+.permissions-panel__grant-hint {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.permissions-panel__audit {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.permissions-panel__audit-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto auto;
+  gap: var(--space-sm);
+  align-items: baseline;
+  padding: 5px var(--space-sm);
+  border-left: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+}
+
+.permissions-panel__audit-row--succeeded { border-left-color: var(--color-status-online); }
+.permissions-panel__audit-row--refused,
+.permissions-panel__audit-row--failed    { border-left-color: var(--color-accent); }
+.permissions-panel__audit-row--attempted { border-left-color: var(--color-border-accent); }
+
+.permissions-panel__audit-time {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+}
+
+.permissions-panel__audit-summary {
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.permissions-panel__audit-outcome {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .permissions-panel__grant,
+  .permissions-panel__audit-row {
+    grid-template-columns: 1fr;
+  }
+}

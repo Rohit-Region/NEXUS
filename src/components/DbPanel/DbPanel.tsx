@@ -5,8 +5,8 @@ import {
   getDbCounts,
   createProject,
   listProjects,
-  deleteProject,
 } from '../../lib/nexus-db';
+import { isNeedsApproval, runAction } from '../../lib/assistant';
 import type { DbStatus, DbCounts, Project } from '../../types/db';
 import './DbPanel.css';
 
@@ -67,7 +67,17 @@ export function DbPanel() {
     setDeleting(id);
     setError(null);
     try {
-      await deleteProject(id);
+      // NEXUS-012: deletion has exactly one path, and it asks first. The
+      // panel is a diagnostic surface, so it approves in the same breath.
+      await runAction({ actionId: 'nexus.delete_project', input: { id } })
+        .catch(async (err) => {
+          if (!isNeedsApproval(err)) throw err;
+          return runAction({
+            actionId: 'nexus.delete_project',
+            input: { id },
+            approval: err.token,
+          });
+        });
       await refresh();
     } catch (err) {
       setError(String(err));

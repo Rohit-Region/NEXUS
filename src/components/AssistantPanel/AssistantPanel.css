@@ -1,0 +1,199 @@
+/* NEXUS-014: the conversation surface.
+   Docked to the right rather than floating over the workspace, so the user
+   can watch a screen change while NEXUS reports what it did. */
+
+.assistant-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(380px, 92vw);
+  z-index: var(--z-overlay);
+  display: flex;
+  flex-direction: column;
+  background-color: var(--color-bg-secondary);
+  border-left: 1px solid var(--color-border);
+  box-shadow: -12px 0 32px rgba(0, 0, 0, 0.28);
+}
+
+.assistant-panel__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.assistant-panel__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+.assistant-panel__state {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+}
+
+.assistant-panel__state--listening,
+.assistant-panel__state--thinking,
+.assistant-panel__state--executing {
+  color: var(--color-accent);
+  border-color: var(--color-border-accent);
+}
+.assistant-panel__state--awaitingConfirmation {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+.assistant-panel__state--completed { color: var(--color-status-online); }
+.assistant-panel__state--failed    { color: var(--color-accent); }
+
+.assistant-panel__close {
+  background: none;
+  border: none;
+  padding: 2px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: flex;
+}
+.assistant-panel__close:hover { color: var(--color-text-primary); }
+
+.assistant-panel__log {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.assistant-panel__empty {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-text-muted);
+}
+
+.assistant-panel__turn {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.assistant-panel__said {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  padding-left: var(--space-sm);
+  border-left: 2px solid var(--color-border);
+}
+
+.assistant-panel__reply {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text-primary);
+}
+
+.assistant-panel__reply--error { color: var(--color-accent); }
+
+.assistant-panel__cited {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+
+.assistant-panel__choices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  align-items: flex-start;
+}
+
+.assistant-panel__referents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: var(--space-sm) var(--space-md);
+  border-top: 1px solid var(--color-border);
+}
+
+.assistant-panel__input-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  border-top: 1px solid var(--color-border);
+}
+
+.assistant-panel__input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  outline: none;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--color-text-primary);
+}
+.assistant-panel__input::placeholder { color: var(--color-text-muted); }
+
+.assistant-panel__mic,
+.assistant-panel__send {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+.assistant-panel__mic:hover:not(:disabled),
+.assistant-panel__send:hover:not(:disabled) {
+  color: var(--color-accent);
+  border-color: var(--color-border-accent);
+}
+.assistant-panel__mic[aria-pressed='true'] {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+.assistant-panel__mic:disabled,
+.assistant-panel__send:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.assistant-panel__settle {
+  border: none;
+  border-top: 1px solid var(--color-border);
+  background: none;
+  padding: var(--space-sm);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.assistant-panel__settle:hover { color: var(--color-text-primary); }
+
+@media (prefers-reduced-motion: reduce) {
+  .assistant-panel { transition: none; }
+}

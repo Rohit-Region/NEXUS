@@ -10,6 +10,7 @@ import {
 } from '../../lib/nexus-db';
 import { RegistryPanel } from '../RegistryPanel/RegistryPanel';
 import type { RegistryKind } from '../RegistryPanel/RegistryPanel';
+import type { Settings } from '../../types/db';
 import './RegistryScreen.css';
 
 const IDE_KIND: RegistryKind = {
@@ -20,6 +21,7 @@ const IDE_KIND: RegistryKind = {
   typePlaceholder: 'editor, terminal, notebook...',
   pathPlaceholder: '/Applications/YourEditor.app',
   projectColumn: 'defaultIdeId',
+  countsTasks: false,
   list: listIdes,
   create: createIde,
   update: updateIde,
@@ -34,14 +36,20 @@ const AGENT_KIND: RegistryKind = {
   typePlaceholder: 'assistant, reviewer, planner...',
   pathPlaceholder: '/usr/local/bin/your-agent',
   projectColumn: 'defaultAgentId',
+  countsTasks: true,
   list: listAgents,
   create: createAgent,
   update: updateAgent,
   remove: deleteAgent,
 };
 
+interface RegistryScreenProps {
+  /** Pass-through only: forwarded to each panel, no logic of its own. */
+  settings: Settings;
+}
+
 /** Layout shell. Owns no data: each panel fetches its own. */
-export function RegistryScreen() {
+export function RegistryScreen({ settings }: RegistryScreenProps) {
   return (
     <section className="registry-screen" aria-label="Registry">
       <div className="registry-screen__header">
@@ -52,8 +60,8 @@ export function RegistryScreen() {
         </p>
       </div>
 
-      <RegistryPanel kind={IDE_KIND} />
-      <RegistryPanel kind={AGENT_KIND} />
+      <RegistryPanel kind={IDE_KIND} settings={settings} />
+      <RegistryPanel kind={AGENT_KIND} settings={settings} />
     </section>
   );
 }

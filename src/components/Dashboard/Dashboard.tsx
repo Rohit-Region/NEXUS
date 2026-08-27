@@ -1,13 +1,20 @@
 import type { NexusView, PanelProps } from '../../types';
+import type { Settings } from '../../types/db';
+import { OverviewScreen } from '../OverviewScreen/OverviewScreen';
 import { ProjectList } from '../ProjectList/ProjectList';
 import { ProjectDetail } from '../ProjectDetail/ProjectDetail';
 import { RegistryScreen } from '../RegistryScreen/RegistryScreen';
+import { SettingsScreen } from '../SettingsScreen/SettingsScreen';
 import './Dashboard.css';
 
 interface DashboardProps extends PanelProps {
   view: NexusView;
   navigate: (view: NexusView) => void;
   onActiveProjectChange: (name: string | null) => void;
+  settings: Settings;
+  onSettingsChange: (next: Settings) => void;
+  /** Navigation counter; see AppShell. Only used to force an intent remount. */
+  navSeq: number;
 }
 
 export function Dashboard({
@@ -15,6 +22,9 @@ export function Dashboard({
   view,
   navigate,
   onActiveProjectChange,
+  settings,
+  onSettingsChange,
+  navSeq,
 }: DashboardProps) {
   return (
     <main className={`dashboard${className ? ` ${className}` : ''}`} role="main">
@@ -27,17 +37,40 @@ export function Dashboard({
 
       {/* Scrollable content column */}
       <div className="dashboard__scroll">
-        {view.screen === 'projects' && <ProjectList navigate={navigate} />}
+        {view.screen === 'overview' && <OverviewScreen navigate={navigate} />}
 
-        {view.screen === 'project-detail' && view.projectId !== undefined && (
-          <ProjectDetail
-            projectId={view.projectId}
+        {view.screen === 'projects' && (
+          <ProjectList
+            key={view.intent ? `projects-${navSeq}` : 'projects'}
             navigate={navigate}
-            onActiveProjectChange={onActiveProjectChange}
+            settings={settings}
+            intent={view.intent}
           />
         )}
 
-        {view.screen === 'registry' && <RegistryScreen />}
+        {view.screen === 'project-detail' && view.projectId !== undefined && (
+          <ProjectDetail
+            key={
+              view.intent
+                ? `${view.projectId}-${navSeq}`
+                : `${view.projectId}`
+            }
+            projectId={view.projectId}
+            intent={view.intent}
+            navigate={navigate}
+            onActiveProjectChange={onActiveProjectChange}
+            settings={settings}
+          />
+        )}
+
+        {view.screen === 'registry' && <RegistryScreen settings={settings} />}
+
+        {view.screen === 'settings' && (
+          <SettingsScreen
+            settings={settings}
+            onSettingsChange={onSettingsChange}
+          />
+        )}
       </div>
     </main>
   );

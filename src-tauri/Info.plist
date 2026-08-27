@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>NEXUS uses the microphone only for voice commands. Speech is recognised entirely on this Mac; audio is never recorded, saved, or sent anywhere.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>NEXUS uses on-device speech recognition to turn a spoken command into text. Nothing is sent to Apple or any other service, and transcripts are never saved.</string>
+</dict>
+</plist>

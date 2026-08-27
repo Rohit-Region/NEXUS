@@ -1,23 +1,84 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Logo } from '../Logo/Logo';
 import { StatusBar } from '../StatusBar/StatusBar';
 import { Dashboard } from '../Dashboard/Dashboard';
 import { CommandBar } from '../CommandBar/CommandBar';
+import { CommandPalette } from '../CommandPalette/CommandPalette';
+import { AssistantPanel } from '../AssistantPanel/AssistantPanel';
+import { VoiceController } from '../VoiceController/VoiceController';
 import type { NexusView } from '../../types';
+import type { Settings } from '../../types/db';
 import './AppShell.css';
+
+interface AppShellProps {
+  /** Supplied by App.tsx. AppShell never loads settings itself (spec 008 N-07). */
+  settings: Settings;
+  onSettingsChange: (next: Settings) => void;
+  settingsError?: string | null;
+}
 
 /**
  * Thin orchestrator: owns view state only.
  * All project data and database access live in the project components.
  */
-export function AppShell() {
-  const [view, setView] = useState<NexusView>({ screen: 'projects' });
+export function AppShell({
+  settings,
+  onSettingsChange,
+  settingsError,
+}: AppShellProps) {
+  // Seeded once on mount: changing the preference later must not navigate the
+  // user away mid-session.
+  const [view, setView] = useState<NexusView>({ screen: settings.launchScreen });
+  const [errorDismissed, setErrorDismissed] = useState(false);
+  // View state only: the palette fetches its own data, so AppShell still
+  // imports nothing from src/lib/nexus-db.ts.
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  // Bumped on every navigation. Destinations consume `intent` as mount state,
+  // so an intent aimed at the screen already showing would otherwise never be
+  // seen. Dashboard folds this into the key only when an intent is present,
+  // leaving ordinary navigation free of spurious remounts.
+  const [navSeq, setNavSeq] = useState(0);
+  // NEXUS-010. AppShell holds plain state only; VoiceController owns the IPC,
+  // so the no-nexus-db rule still holds here.
+  const [voiceActive, setVoiceActive] = useState(false);
+  // NEXUS-014. The conversation surface. Still plain state: VoiceController
+  // and AssistantPanel own their own IPC, so the no-nexus-db rule holds here.
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [spokenText, setSpokenText] = useState<string | null>(null);
+
+  /**
+   * A final transcript now goes to the assistant rather than the palette.
+   *
+   * NEXUS-010 routed it to the palette because the palette was where
+   * confirmation lived. Since NEXUS-012 confirmation is enforced in Rust, so
+   * the invariant no longer depends on which surface receives the text, and
+   * one conversation is better than two. The palette keeps working from
+   * Command-K; its voice props are simply no longer used from here.
+   */
+  const handleFinalTranscript = useCallback((text: string) => {
+    setSpokenText(text);
+    setAssistantOpen(true);
+  }, []);
+
+  // Command-K only. Control-K is the Emacs kill-line binding that macOS text
+  // inputs honour, and NEXUS is macOS-first.
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.metaKey && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setPaletteOpen((prev) => !prev);
+      }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
   const [activeProjectName, setActiveProjectName] = useState<string | null>(null);
 
   const navigate = useCallback((next: NexusView) => {
     if (next.screen !== 'project-detail') {
       setActiveProjectName(null);
     }
+    setNavSeq((n) => n + 1);
     setView(next);
   }, []);
 
@@ -38,6 +99,14 @@ export function AppShell() {
           <button
             className="app-shell__nav-btn"
             type="button"
+            onClick={() => navigate({ screen: 'overview' })}
+            aria-current={view.screen === 'overview' ? 'page' : undefined}
+          >
+            Overview
+          </button>
+          <button
+            className="app-shell__nav-btn"
+            type="button"
             onClick={() => navigate({ screen: 'projects' })}
             aria-current={onProjects ? 'page' : undefined}
           >
@@ -51,6 +120,14 @@ export function AppShell() {
           >
             Registry
           </button>
+          <button
+            className="app-shell__nav-btn"
+            type="button"
+            onClick={() => navigate({ screen: 'settings' })}
+            aria-current={view.screen === 'settings' ? 'page' : undefined}
+          >
+            Settings
+          </button>
         </nav>
 
         {showBadge && (
@@ -63,13 +140,63 @@ export function AppShell() {
         <StatusBar />
       </header>
 
+      {settingsError && !errorDismissed && (
+        <div className="app-shell__notice" role="status">
+          <span>
+            Settings could not be loaded, so defaults are in use. Everything
+            else works normally.
+          </span>
+          <button
+            className="nexus-btn nexus-btn--secondary"
+            type="button"
+            onClick={() => setErrorDismissed(true)}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       <Dashboard
         view={view}
         navigate={navigate}
         onActiveProjectChange={handleActiveProjectChange}
+        settings={settings}
+        onSettingsChange={onSettingsChange}
+        navSeq={navSeq}
       />
 
-      <CommandBar />
+      <CommandBar
+        onOpenPalette={() => setPaletteOpen(true)}
+        voiceEnabled={settings.voiceEnabled}
+        voiceActive={voiceActive}
+        onVoiceToggle={() => setVoiceActive((prev) => !prev)}
+        assistantOpen={assistantOpen}
+        onOpenAssistant={() => setAssistantOpen((prev) => !prev)}
+      />
+
+      <AssistantPanel
+        open={assistantOpen}
+        onClose={() => setAssistantOpen(false)}
+        navigate={navigate}
+        voiceEnabled={settings.voiceEnabled}
+        voiceActive={voiceActive}
+        onVoiceToggle={() => setVoiceActive((prev) => !prev)}
+        spokenText={spokenText}
+        onSpokenConsumed={() => setSpokenText(null)}
+      />
+
+      <VoiceController
+        enabled={settings.voiceEnabled}
+        active={voiceActive}
+        onActiveChange={setVoiceActive}
+        onFinalTranscript={handleFinalTranscript}
+      />
+
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        navigate={navigate}
+      />
     </div>
   );
 }

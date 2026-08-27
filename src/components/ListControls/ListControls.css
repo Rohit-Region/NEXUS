@@ -1,0 +1,40 @@
+.list-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+  padding: var(--space-sm) 0;
+}
+
+.list-controls__search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 180px;
+}
+
+.list-controls__search-icon {
+  position: absolute;
+  left: var(--space-sm);
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+
+.list-controls__input {
+  padding-left: calc(var(--space-lg) + 2px);
+  padding-right: var(--space-lg);
+}
+
+.list-controls__clear {
+  position: absolute;
+  right: var(--space-sm);
+  display: flex;
+  align-items: center;
+  color: var(--color-text-muted);
+  transition: color 0.15s ease;
+}
+
+.list-controls__clear:hover:not(:disabled) {
+  color: var(--color-accent);
+}

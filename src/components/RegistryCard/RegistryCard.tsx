@@ -8,6 +8,8 @@ interface RegistryCardProps {
   singular: string;
   /** Projects using this entry as a default; drives the delete warning. */
   projectUsage: number;
+  /** Tasks assigned to this entry, or null when the kind holds no tasks. */
+  taskUsage: number | null;
   isEditing: boolean;
   isConfirmingDelete: boolean;
   busy: boolean;
@@ -19,7 +21,11 @@ interface RegistryCardProps {
   children?: React.ReactNode;
 }
 
-function usageWarning(singular: string, projectUsage: number): string {
+function usageWarning(
+  singular: string,
+  projectUsage: number,
+  taskUsage: number | null,
+): string {
   const lower = singular.toLowerCase();
   const projects =
     projectUsage === 0
@@ -27,7 +33,19 @@ function usageWarning(singular: string, projectUsage: number): string {
       : projectUsage === 1
         ? '1 project uses it as a default and will be cleared'
         : `${projectUsage} projects use it as a default and will be cleared`;
-  return `Delete this ${lower}? ${projects}. Any task assigned to it will be unassigned. Nothing else is deleted.`;
+
+  // Omitted entirely for a kind that cannot hold task assignments: the
+  // sentence would be false for an IDE (spec 006 7.7).
+  const tasks =
+    taskUsage === null
+      ? ''
+      : taskUsage === 0
+        ? ' No task is assigned to it.'
+        : taskUsage === 1
+          ? ' 1 task is assigned to it and will be unassigned.'
+          : ` ${taskUsage} tasks are assigned to it and will be unassigned.`;
+
+  return `Delete this ${lower}? ${projects}.${tasks} Nothing else is deleted.`;
 }
 
 /**
@@ -38,6 +56,7 @@ export function RegistryCard({
   entry,
   singular,
   projectUsage,
+  taskUsage,
   isEditing,
   isConfirmingDelete,
   busy,
@@ -113,7 +132,7 @@ export function RegistryCard({
           aria-label={`Confirm deletion of ${entry.name}`}
         >
           <span className="registry-card__confirm-text">
-            {usageWarning(singular, projectUsage)}
+            {usageWarning(singular, projectUsage, taskUsage)}
           </span>
           <div className="registry-card__confirm-actions">
             <button
