@@ -1,0 +1,54 @@
+/* NEXUS-012: the approval surface.
+   Sits inline where the action was requested, so the confirmation appears
+   next to the thing it affects rather than floating over the app. */
+
+.approval-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  border: 1px solid var(--color-border);
+  border-left: 2px solid var(--color-border-accent);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-bg-tertiary);
+}
+
+.approval-prompt--severe {
+  border-left-color: var(--color-accent);
+}
+
+.approval-prompt__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+  color: var(--color-text-primary);
+}
+
+.approval-prompt--severe .approval-prompt__head svg {
+  color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.approval-prompt__summary {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.approval-prompt__note {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.approval-prompt--severe .approval-prompt__note {
+  color: var(--color-accent);
+}
+
+.approval-prompt__actions {
+  display: flex;
+  gap: var(--space-sm);
+  justify-content: flex-end;
+}

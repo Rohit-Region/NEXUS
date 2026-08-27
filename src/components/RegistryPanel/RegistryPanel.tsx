@@ -1,12 +1,25 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Plus, ServerCog } from 'lucide-react';
-import { listProjects } from '../../lib/nexus-db';
-import type { RegistryFormValues } from '../../types';
+import { countTasksByAgent, listProjects } from '../../lib/nexus-db';
+import {
+  matchesQuery,
+  normalizeQuery,
+  registryComparator,
+  sortWithIdTiebreak,
+  REGISTRY_SORT_OPTIONS,
+} from '../../lib/list-filters';
+import type {
+  EnabledFilter,
+  RegistryFormValues,
+  RegistrySortMode,
+} from '../../types';
 import type {
   CreateRegistryEntryInput,
   RegistryEntry,
+  Settings,
   UpdateRegistryEntryInput,
 } from '../../types/db';
+import { ListControls } from '../ListControls/ListControls';
 import { RegistryCard } from '../RegistryCard/RegistryCard';
 import { RegistryForm } from '../RegistryForm/RegistryForm';
 import './RegistryPanel.css';
@@ -24,6 +37,11 @@ export interface RegistryKind {
   pathPlaceholder: string;
   /** Which project column references this kind, for the usage count. */
   projectColumn: 'defaultIdeId' | 'defaultAgentId';
+  /**
+   * Whether this kind can hold task assignments. Agents can; IDEs cannot.
+   * Keeps the IDE panel from issuing a query that has no meaning for it.
+   */
+  countsTasks: boolean;
   list: (enabledOnly: boolean) => Promise<RegistryEntry[]>;
   create: (input: CreateRegistryEntryInput) => Promise<RegistryEntry>;
   update: (input: UpdateRegistryEntryInput) => Promise<RegistryEntry>;
@@ -32,6 +50,22 @@ export interface RegistryKind {
 
 interface RegistryPanelProps {
   kind: RegistryKind;
+  settings: Settings;
+}
+
+/** The single predicate used by both the render and the R-02 hidden check. */
+function entryMatches(
+  entry: RegistryEntry,
+  normalized: string,
+  enabledFilter: EnabledFilter,
+): boolean {
+  const enabledOk =
+    enabledFilter === 'all' ||
+    (enabledFilter === 'enabled' ? entry.enabled : !entry.enabled);
+  return (
+    enabledOk &&
+    matchesQuery(normalized, [entry.name, entry.entryType, entry.executablePath])
+  );
 }
 
 /** Empty strings become undefined so optional columns stay NULL in SQLite. */
@@ -49,9 +83,10 @@ function toFormValues(entry: RegistryEntry): RegistryFormValues {
   };
 }
 
-export function RegistryPanel({ kind }: RegistryPanelProps) {
+export function RegistryPanel({ kind, settings }: RegistryPanelProps) {
   const [entries, setEntries] = useState<RegistryEntry[]>([]);
   const [usage, setUsage] = useState<Map<number, number>>(new Map());
+  const [taskUsage, setTaskUsage] = useState<Map<number, number>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -60,13 +95,28 @@ export function RegistryPanel({ kind }: RegistryPanelProps) {
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
 
+  // NEXUS-007 controls. Session-local, and independent per panel instance:
+  // filtering IDEs does not filter agents.
+  const [query, setQuery] = useState('');
+  // Seeded from settings on mount; session changes never write back.
+  const [sort, setSort] = useState<RegistrySortMode>(settings.registrySort);
+  // The mount-time seed is what Reset returns to (see ProjectList).
+  const [seededSort] = useState<RegistrySortMode>(settings.registrySort);
+  const [enabledFilter, setEnabledFilter] = useState<EnabledFilter>('all');
+  const [hiddenNotice, setHiddenNotice] = useState<string | null>(null);
+
   // enabledOnly = false: the registry shows every entry, enabled or not.
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [rows, projects] = await Promise.all([kind.list(false), listProjects()]);
+      const [rows, projects, taskCounts] = await Promise.all([
+        kind.list(false),
+        listProjects(),
+        kind.countsTasks ? countTasksByAgent() : Promise.resolve([]),
+      ]);
       setEntries(rows);
+      setTaskUsage(new Map(taskCounts.map((c) => [c.agentId, c.taskCount])));
 
       // Usage counts for the delete warning; no new command required.
       const counts = new Map<number, number>();
@@ -86,19 +136,28 @@ export function RegistryPanel({ kind }: RegistryPanelProps) {
     void refresh();
   }, [refresh]);
 
+  // R-02: a save that lands outside the active controls must never look like
+  // it failed. Returns the name to announce, or null when it stays visible.
+  function noticeFor(entry: RegistryEntry): string | null {
+    return entryMatches(entry, normalizeQuery(query), enabledFilter)
+      ? null
+      : entry.name;
+  }
+
   // ── Actions ──────────────────────────────────────────────────────────────
 
   async function handleCreate(values: RegistryFormValues) {
     setSubmitting(true);
     setError(null);
     try {
-      await kind.create({
+      const created = await kind.create({
         name: values.name.trim(),
         entryType: values.entryType.trim(),
         executablePath: optional(values.executablePath),
         enabled: values.enabled,
       });
       setShowCreateForm(false);
+      setHiddenNotice(noticeFor(created));
       await refresh();
     } catch (err) {
       setError(String(err));
@@ -111,7 +170,7 @@ export function RegistryPanel({ kind }: RegistryPanelProps) {
     setSubmitting(true);
     setError(null);
     try {
-      await kind.update({
+      const saved = await kind.update({
         id,
         name: values.name.trim(),
         entryType: values.entryType.trim(),
@@ -119,6 +178,7 @@ export function RegistryPanel({ kind }: RegistryPanelProps) {
         enabled: values.enabled,
       });
       setEditingId(null);
+      setHiddenNotice(noticeFor(saved));
       await refresh();
     } catch (err) {
       setError(String(err));
@@ -131,13 +191,14 @@ export function RegistryPanel({ kind }: RegistryPanelProps) {
     setBusyId(entry.id);
     setError(null);
     try {
-      await kind.update({
+      const toggled = await kind.update({
         id: entry.id,
         name: entry.name,
         entryType: entry.entryType,
         executablePath: entry.executablePath ?? undefined,
         enabled: !entry.enabled,
       });
+      setHiddenNotice(noticeFor(toggled));
       await refresh();
     } catch (err) {
       setError(String(err));
@@ -173,6 +234,24 @@ export function RegistryPanel({ kind }: RegistryPanelProps) {
 
   // ── Render ───────────────────────────────────────────────────────────────
 
+  const normalized = normalizeQuery(query);
+  const isActive =
+    normalized.length > 0 || sort !== seededSort || enabledFilter !== 'all';
+
+  const visible = sortWithIdTiebreak(
+    entries.filter((e) => entryMatches(e, normalized, enabledFilter)),
+    registryComparator(sort),
+  );
+
+  function resetControls() {
+    setQuery('');
+    setSort(seededSort);
+    setEnabledFilter('all');
+    setHiddenNotice(null);
+  }
+
+  // Reads the UNFILTERED array: it reports what the registry holds, not what
+  // the filter shows (spec 007 7.5).
   const disabledCount = entries.filter((e) => !e.enabled).length;
   const isEmpty = !loading && entries.length === 0;
 
@@ -182,7 +261,11 @@ export function RegistryPanel({ kind }: RegistryPanelProps) {
         <div className="registry-panel__title-group">
           <h3 className="registry-panel__title">{kind.title}</h3>
           {!loading && (
-            <span className="registry-panel__count">{entries.length}</span>
+            <span className="registry-panel__count">
+              {isActive
+                ? `${visible.length} of ${entries.length}`
+                : entries.length}
+            </span>
           )}
           {disabledCount > 0 && (
             <span className="nexus-chip nexus-chip--muted">
@@ -205,6 +288,77 @@ export function RegistryPanel({ kind }: RegistryPanelProps) {
           New {kind.singular}
         </button>
       </div>
+
+      {entries.length > 0 && (
+        <ListControls
+          searchValue={query}
+          onSearchChange={(v) => {
+            setQuery(v);
+            setHiddenNotice(null);
+          }}
+          searchPlaceholder="Search name, type or path"
+          sortValue={sort}
+          sortOptions={REGISTRY_SORT_OPTIONS}
+          onSortChange={(v) => {
+            setSort(v);
+            setHiddenNotice(null);
+          }}
+          filterSlot={
+            <div
+              className="nexus-filter-bar"
+              role="group"
+              aria-label="Filter by enabled state"
+            >
+              {(['all', 'enabled', 'disabled'] as EnabledFilter[]).map((f) => (
+                <button
+                  key={f}
+                  className={`nexus-btn ${
+                    enabledFilter === f
+                      ? 'nexus-btn--primary'
+                      : 'nexus-btn--secondary'
+                  }`}
+                  type="button"
+                  onClick={() => {
+                    setEnabledFilter(f);
+                    setHiddenNotice(null);
+                  }}
+                  aria-pressed={enabledFilter === f}
+                >
+                  {f}
+                </button>
+              ))}
+            </div>
+          }
+          isActive={isActive}
+          onReset={resetControls}
+          disabled={loading}
+        />
+      )}
+
+      {hiddenNotice && (
+        <div className="nexus-notice" role="status">
+          <span>
+            Saved &quot;{hiddenNotice}&quot;, but it is hidden by the current
+            filters.
+          </span>
+          <div className="nexus-notice__actions">
+            <button
+              className="nexus-btn nexus-btn--secondary"
+              type="button"
+              onClick={resetControls}
+            >
+              Reset Filters
+            </button>
+            <button
+              className="nexus-btn nexus-btn--secondary"
+              type="button"
+              onClick={() => setHiddenNotice(null)}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {showCreateForm && (
         <RegistryForm
@@ -250,14 +404,33 @@ export function RegistryPanel({ kind }: RegistryPanelProps) {
         </div>
       )}
 
-      {entries.length > 0 && (
+      {!loading && entries.length > 0 && visible.length === 0 && (
+        <div className="nexus-no-results">
+          <span className="nexus-no-results__title">
+            No matching {kind.title.toLowerCase()}
+          </span>
+          <span className="nexus-no-results__text">
+            {entries.length} in total. Relax the filters to see them.
+          </span>
+          <button
+            className="nexus-btn nexus-btn--secondary"
+            type="button"
+            onClick={resetControls}
+          >
+            Reset Filters
+          </button>
+        </div>
+      )}
+
+      {visible.length > 0 && (
         <div className="registry-panel__items">
-          {entries.map((entry) => (
+          {visible.map((entry) => (
             <RegistryCard
               key={entry.id}
               entry={entry}
               singular={kind.singular}
               projectUsage={usage.get(entry.id) ?? 0}
+              taskUsage={kind.countsTasks ? taskUsage.get(entry.id) ?? 0 : null}
               isEditing={editingId === entry.id}
               isConfirmingDelete={confirmDeleteId === entry.id}
               busy={busyId === entry.id}

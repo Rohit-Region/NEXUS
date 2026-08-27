@@ -1,0 +1,63 @@
+.voice-indicator {
+  position: fixed;
+  left: 50%;
+  bottom: 96px;
+  transform: translateX(-50%);
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  max-width: 620px;
+  padding: var(--space-sm) var(--space-md);
+  background-color: var(--color-bg-tertiary);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-primary);
+}
+
+.voice-indicator--error {
+  border-color: var(--color-accent-dim);
+  color: var(--color-text-secondary);
+}
+
+.voice-indicator__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--color-accent);
+  animation: pulse-dot 1.2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.voice-indicator__label {
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+  white-space: nowrap;
+}
+
+.voice-indicator__partial {
+  flex: 1;
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The error variant carries a remedy line, so it wraps instead of truncating */
+.voice-indicator--error .voice-indicator__partial {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+/* Remedy line under a recognition error: Apple names the cause, not the fix */
+.voice-indicator__hint {
+  display: block;
+  margin-top: var(--space-xs);
+  color: var(--color-text-muted);
+  white-space: normal;
+}
