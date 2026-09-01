@@ -57,6 +57,10 @@ pub struct ActionOutcome {
     /// The same sentence the approval prompt showed, so the caller can report
     /// what happened without rebuilding it.
     pub summary: String,
+    /// What the action actually found, described by the connector. None when
+    /// the result is the navigation itself and there is nothing to read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
     pub audit_id: i64,
 }
 
@@ -140,7 +144,9 @@ impl std::fmt::Display for ActionError {
             ActionError::InvalidApproval { reason } => {
                 write!(f, "That approval is no longer valid: {reason}")
             }
-            ActionError::InvalidInput { detail } => write!(f, "That request was malformed: {detail}"),
+            ActionError::InvalidInput { detail } => {
+                write!(f, "That request was malformed: {detail}")
+            }
             ActionError::Failed { detail } => write!(f, "{detail}"),
         }
     }
@@ -204,7 +210,13 @@ mod tests {
             expires_in_ms: 300_000,
         };
         let json = serde_json::to_string(&err).expect("serialize");
-        for field in ["token", "summary", "permission", "reversible", "expiresInMs"] {
+        for field in [
+            "token",
+            "summary",
+            "permission",
+            "reversible",
+            "expiresInMs",
+        ] {
             assert!(json.contains(field), "missing {field} in {json}");
         }
     }

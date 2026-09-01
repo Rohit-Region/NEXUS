@@ -115,6 +115,9 @@ export const DEFAULT_SETTINGS: Settings = {
   // takes it from voice::speech::DEFAULT_VOICE. Rishi rather than Tara:
   // AVSpeechSynthesizer does not expose Tara, whatever `say -v ?` reports.
   voiceName: 'Rishi',
+  alwaysListening: false,
+  // Must match DEFAULT_REPLIES in src-tauri/src/voice/wake.rs.
+  wakeReplies: ['Yes Rohi', 'Yes boss', 'Go ahead'],
 };
 
 /**

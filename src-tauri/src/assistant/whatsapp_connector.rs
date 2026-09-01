@@ -26,7 +26,8 @@ use serde::Deserialize;
 
 use super::action::{ActionError, ActionSpec};
 use super::connector::{
-    Capabilities, Connector, ConnectorStatus, ExecCtx, ReferentDraft, UnavailableAction,
+    Capabilities, Connector, ConnectorStatus, ExecCtx, FollowUp, ReferentDraft, Remedy,
+    UnavailableAction,
 };
 use super::permission::{ConfirmPolicy, Permission, Reach};
 use super::referent::ReferentKind;
@@ -47,6 +48,20 @@ pub const ACTIONS: &[ActionSpec] = &[
         confirm: ConfirmPolicy::Never,
         reach: Reach::LocalOnly,
         reversible: true,
+    },
+    ActionSpec {
+        // Presses Return in the chat WhatsApp already has open, which is the
+        // one the user is looking at. Separate from compose so the draft is
+        // on screen, and the person it is addressed to is visible, before
+        // anything is sent.
+        id: "whatsapp.press_send",
+        connector_id: CONNECTOR_ID,
+        summary: "Send the message showing in WhatsApp",
+        permission: Permission::Write,
+        confirm: ConfirmPolicy::Always,
+        reach: Reach::LocalOnly,
+        // Nothing here can unsend it.
+        reversible: false,
     },
     ActionSpec {
         id: "whatsapp.compose_message",
@@ -126,6 +141,75 @@ fn installed() -> bool {
     std::path::Path::new(APP_PATH).exists()
 }
 
+/// Press Return in WhatsApp, and only in WhatsApp.
+///
+/// The activation, the focus check and the keystroke are one script on
+/// purpose. Split across two, another window can take focus in between and
+/// the message is typed into whatever arrived instead. That failure is
+/// silent and lands the user's words somewhere they never chose, which is
+/// the whole reason synthetic input is worth being careful with.
+///
+/// **It activates WhatsApp first, and that is a correction.** The check
+/// alone refused whenever anything else was in front, which sounds careful
+/// until you notice what is always in front: NEXUS. The user has just spoken
+/// to the assistant panel, so the assistant window has focus by definition,
+/// and the action could not succeed from the path it exists to serve. Two of
+/// the three recorded attempts failed for exactly that reason. Refusing to
+/// raise the window did not make the keystroke safer, it made it
+/// unreachable.
+///
+/// The check is kept, and kept *after* the activation, so it still answers
+/// the question that matters: is the thing about to receive a Return really
+/// WhatsApp. Activation that silently fails now reports rather than types.
+///
+/// Return rather than a click on the send button: locating the button needs
+/// the accessibility tree, and a wrong hit there presses something else.
+const PRESS_SEND: [&str; 9] = [
+    "tell application \"WhatsApp\" to activate",
+    // Raising a window is not instant. Without the wait the frontmost check
+    // reads the app that is on its way out and refuses a send that would
+    // have been fine a moment later.
+    "delay 0.4",
+    "tell application \"System Events\"",
+    "set n to name of first application process whose frontmost is true",
+    "if n is not \"WhatsApp\" then return \"not-front:\" & n",
+    "key code 36",
+    "end tell",
+    "delay 0.1",
+    "return \"sent\"",
+];
+
+fn press_send() -> Result<(), ActionError> {
+    let out = crate::assistant::shell::osascript(&PRESS_SEND, &[]).map_err(|e| {
+        ActionError::Failed {
+            detail: format!("Could not reach WhatsApp: {e}"),
+        }
+    })?;
+
+    if !out.success {
+        // The usual cause, and the one with a remedy the user can act on.
+        let detail = if out.stderr.contains("not allowed") || out.stderr.contains("1002") {
+            "NEXUS is not allowed to send keystrokes. Turn it on in System Settings \
+             > Privacy & Security > Accessibility, then try again."
+                .to_string()
+        } else {
+            format!("WhatsApp refused: {}", out.stderr.trim())
+        };
+        return Err(ActionError::Failed { detail });
+    }
+
+    match out.stdout.trim() {
+        "sent" => Ok(()),
+        other => Err(ActionError::Failed {
+            detail: format!(
+                "{} was in front instead of WhatsApp, so nothing was sent. \
+                 Bring WhatsApp to the front and say it again.",
+                other.strip_prefix("not-front:").unwrap_or(other)
+            ),
+        }),
+    }
+}
+
 pub struct WhatsappConnector;
 
 impl Connector for WhatsappConnector {
@@ -173,10 +257,7 @@ impl Connector for WhatsappConnector {
             "whatsapp.compose_message" => {
                 match serde_json::from_value::<ComposeInput>(input.clone()) {
                     Ok(c) => {
-                        let who = c
-                            .display_name
-                            .clone()
-                            .unwrap_or_else(|| c.phone.clone());
+                        let who = c.display_name.clone().unwrap_or_else(|| c.phone.clone());
                         format!(
                             "Open WhatsApp to {who} with this ready to send: \"{}\"",
                             c.message.chars().take(140).collect::<String>()
@@ -234,6 +315,78 @@ impl Connector for WhatsappConnector {
             .collect()
     }
 
+    fn describe_result(&self, action_id: &str, output: &serde_json::Value) -> Option<String> {
+        match action_id {
+            "whatsapp.status" => Some(if output.get("installed")?.as_bool().unwrap_or(false) {
+                "WhatsApp is installed. NEXUS can draft a message for you to send, \
+                 but it cannot read your conversations."
+                    .to_string()
+            } else {
+                // A dead end here is a false negative: the desktop app is
+                // not the only WhatsApp on this machine, and saying only
+                // that it is missing hides the route that does work.
+                // A bare "not installed" is a false dead end: the desktop
+                // app is not the only WhatsApp on this machine. Chrome is
+                // reached through the browser connector, not from here, so
+                // this points at it rather than automating it.
+                "The WhatsApp desktop app is not installed on this Mac. \
+                 WhatsApp Web works in Chrome: say \"go to WhatsApp\" and I \
+                 will switch to that tab."
+                    .to_string()
+            }),
+            "whatsapp.compose_message" => Some(
+                "WhatsApp is open with your message ready. Check it is the right chat."
+                    .to_string(),
+            ),
+            "whatsapp.press_send" => Some("Sent.".to_string()),
+            _ => None,
+        }
+    }
+
+    fn zero_input_actions(&self) -> &'static [&'static str] {
+        // press_send needs no arguments, so "send it" reaches it directly.
+        // It is still gated: ConfirmPolicy::Always means the user confirms
+        // before anything leaves.
+        &["whatsapp.status", "whatsapp.press_send"]
+    }
+
+    /// A draft on screen is a question, and "yes" is an answer to it.
+    ///
+    /// Only from `compose_message`: `press_send` itself offers nothing,
+    /// because the message is already gone and there is nothing left to
+    /// agree to.
+    /// The Accessibility grant, which is the only failure here with a fix
+    /// NEXUS can point at. A network problem or a chat that moved has no
+    /// remedy worth offering, and offering one anyway spends the user's
+    /// attention on something that will not work.
+    fn remedy(&self, _action_id: &str, error: &ActionError) -> Option<Remedy> {
+        let detail = match error {
+            ActionError::Failed { detail } => detail,
+            _ => return None,
+        };
+        detail.contains("not allowed to send keystrokes").then(|| Remedy {
+            prompt: "NEXUS is not allowed to send keystrokes. Shall I open \
+                     Accessibility settings?"
+                .to_string(),
+            action_id: "system.open_settings_pane",
+            input: serde_json::json!({ "pane": "accessibility" }),
+        })
+    }
+
+    fn follow_up(
+        &self,
+        action_id: &str,
+        _input: &serde_json::Value,
+        _output: &serde_json::Value,
+    ) -> Option<FollowUp> {
+        (action_id == "whatsapp.compose_message").then_some(FollowUp {
+            action_id: "whatsapp.press_send",
+            // Presses Return in the chat already on screen, so there is
+            // nothing to carry.
+            input: serde_json::Value::Null,
+        })
+    }
+
     fn dispatch(
         &self,
         action_id: &str,
@@ -254,19 +407,27 @@ impl Connector for WhatsappConnector {
                      conversations, and no supported mechanism exists to add that."
             })),
 
+            "whatsapp.press_send" => {
+                if !installed() {
+                    return Err(ActionError::Failed {
+                        detail: "WhatsApp is not installed on this Mac.".to_string(),
+                    });
+                }
+                press_send()?;
+                Ok(serde_json::json!({ "sent": true }))
+            }
             "whatsapp.compose_message" => {
                 let target: ComposeInput =
                     serde_json::from_value(input).map_err(|e| ActionError::InvalidInput {
                         detail: e.to_string(),
                     })?;
-                let phone = valid_phone(&target.phone).ok_or_else(|| {
-                    ActionError::InvalidInput {
+                let phone =
+                    valid_phone(&target.phone).ok_or_else(|| ActionError::InvalidInput {
                         detail: format!(
                             "\"{}\" is not an international phone number.",
                             target.phone
                         ),
-                    }
-                })?;
+                    })?;
                 let message = check_message(&target.message)?;
 
                 if !installed() {
@@ -313,11 +474,72 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_draft_offers_the_send_that_follows_it() {
+        let connector = WhatsappConnector;
+        let nothing = serde_json::Value::Null;
+        assert_eq!(
+            connector
+                .follow_up("whatsapp.compose_message", &nothing, &nothing)
+                .map(|f| f.action_id),
+            Some("whatsapp.press_send"),
+            "a draft on screen is a question, and \"yes\" must have somewhere to go"
+        );
+        // Nothing left to agree to once it has gone.
+        assert!(connector
+            .follow_up("whatsapp.press_send", &nothing, &nothing)
+            .is_none());
+        assert!(connector
+            .follow_up("whatsapp.status", &nothing, &nothing)
+            .is_none());
+    }
+
+    #[test]
+    fn the_send_script_raises_whatsapp_before_it_checks_what_is_in_front() {
+        // The defect: the check alone refused whenever anything else had
+        // focus, and after the user speaks to the assistant the thing with
+        // focus is always NEXUS. Two of three recorded attempts failed on
+        // exactly that. Activating first is what makes the action reachable
+        // from the path it exists to serve.
+        let activate = PRESS_SEND
+            .iter()
+            .position(|line| line.contains("activate"))
+            .expect("the script must raise WhatsApp");
+        let check = PRESS_SEND
+            .iter()
+            .position(|line| line.contains("frontmost"))
+            .expect("the script must still check what is in front");
+        let keystroke = PRESS_SEND
+            .iter()
+            .position(|line| line.contains("key code 36"))
+            .expect("the script must press Return");
+
+        assert!(activate < check, "raising it before the check is the fix");
+        assert!(
+            check < keystroke,
+            "the check must still gate the keystroke, or a Return lands in \
+             whatever happens to be in front"
+        );
+        assert!(
+            PRESS_SEND.iter().any(|line| line.contains("delay")),
+            "raising a window is not instant; without the wait the check \
+             reads the app on its way out"
+        );
+    }
+
+    #[test]
     fn international_numbers_are_accepted_in_the_shapes_people_write_them() {
-        for raw in ["+919876543210", "919876543210", "+91 98765 43210", "+1 (415) 555-0100"] {
+        for raw in [
+            "+919876543210",
+            "919876543210",
+            "+91 98765 43210",
+            "+1 (415) 555-0100",
+        ] {
             assert!(valid_phone(raw).is_some(), "{raw}");
         }
-        assert_eq!(valid_phone("+91 98765 43210").as_deref(), Some("919876543210"));
+        assert_eq!(
+            valid_phone("+91 98765 43210").as_deref(),
+            Some("919876543210")
+        );
     }
 
     #[test]
@@ -327,7 +549,7 @@ mod tests {
         for hostile in [
             "",
             "12345",
-            "alec@avetta.com",
+            "alec@acme.com",
             "+91987654321012345678",
             "+91-abc-defg",
             "919876543210&text=hijacked",
@@ -360,7 +582,10 @@ mod tests {
                 "{id} implies inbound access that cannot be built"
             );
         }
-        assert_eq!(ACTIONS.len(), 2, "status and compose, and nothing else");
+        // Status, compose, and press-send. Reading conversations is still
+        // absent and still unbuildable; sending one the user is looking at
+        // is a different thing from reading the ones they are not.
+        assert_eq!(ACTIONS.len(), 3, "no action beyond these three");
     }
 
     #[test]
@@ -369,7 +594,11 @@ mod tests {
             .iter()
             .find(|s| s.id == "whatsapp.compose_message")
             .expect("present");
-        assert!(compose.summary.contains("for you to send"), "{}", compose.summary);
+        assert!(
+            compose.summary.contains("for you to send"),
+            "{}",
+            compose.summary
+        );
         assert!(!compose.summary.starts_with("Send"));
     }
 
@@ -381,7 +610,11 @@ mod tests {
             .expect("present");
         assert_eq!(compose.permission, Permission::Write);
         assert_eq!(compose.confirm, ConfirmPolicy::Always);
-        assert_eq!(compose.reach, Reach::LocalOnly, "nothing is transmitted by NEXUS");
+        assert_eq!(
+            compose.reach,
+            Reach::LocalOnly,
+            "nothing is transmitted by NEXUS"
+        );
     }
 
     #[test]
@@ -393,13 +626,44 @@ mod tests {
 
     #[test]
     fn no_unofficial_automation_is_reached_for() {
+        // "osascript" was on this list until the user asked, twice and
+        // explicitly, for NEXUS to press send on their own machine and their
+        // own account. What the list still forbids is the part that was
+        // never about their choice: reverse-engineered clients and scraping
+        // WhatsApp's web app, which impersonate the client rather than drive
+        // the one they installed.
         let production = include_str!("whatsapp_connector.rs")
             .split_once("#[cfg(test)]")
             .map(|(before, _)| before)
             .expect("marker");
-        for forbidden in ["whatsapp-web", "Baileys", "web.whatsapp.com", "puppeteer", "osascript"] {
+        for forbidden in ["whatsapp-web", "Baileys", "web.whatsapp.com", "puppeteer"] {
             assert!(!production.contains(forbidden), "found {forbidden}");
         }
+    }
+
+    #[test]
+    fn the_keystroke_can_never_land_in_another_application() {
+        // The one guarantee that matters once synthetic input is allowed:
+        // the check that WhatsApp is frontmost and the keystroke itself are
+        // in the SAME script, so nothing can steal focus between them. Two
+        // scripts would be a race, and losing it means typing into whatever
+        // window arrived instead.
+        let production = include_str!("whatsapp_connector.rs")
+            .split_once("#[cfg(test)]")
+            .map(|(before, _)| before)
+            .expect("marker");
+        let script = production
+            .split_once("const PRESS_SEND: [&str; ")
+            .map(|(_, rest)| rest)
+            .expect("the send script must be one literal");
+        let body = &script[..script.find("];").expect("end of script")];
+        let front = body.find("frontmost").expect("must check what is frontmost");
+        let key = body.find("key code 36").expect("must press return");
+        assert!(front < key, "the focus check has to come first");
+        assert!(
+            body.contains("if n is not \\\"WhatsApp\\\" then"),
+            "the keystroke must be guarded by the check, not merely preceded by it"
+        );
     }
 
     #[test]

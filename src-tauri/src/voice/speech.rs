@@ -17,6 +17,7 @@
 //!   answer to the last one rather than a queue of stale ones.
 
 use std::cell::RefCell;
+use std::time::Duration;
 
 use objc2::rc::Retained;
 use objc2_avf_audio::{
@@ -113,8 +114,7 @@ fn gender_label(gender: AVSpeechSynthesisVoiceGender) -> &'static str {
 /// legacy namespace so the novelty voices stay out. Pure, so the rule is
 /// tested rather than trusted.
 fn selectable(identifier: &str, language: &str) -> bool {
-    language.to_ascii_lowercase().starts_with("en")
-        && !identifier.starts_with(LEGACY_VOICE_PREFIX)
+    language.to_ascii_lowercase().starts_with("en") && !identifier.starts_with(LEGACY_VOICE_PREFIX)
 }
 
 fn quality_label(quality: AVSpeechSynthesisVoiceQuality) -> &'static str {
@@ -212,9 +212,9 @@ pub fn resolve_index(preference: &str, voices: &[VoiceOption]) -> Option<usize> 
                 .position(|v| v.name.eq_ignore_ascii_case(wanted))
         })
         .or_else(|| {
-            voices.iter().position(|v| {
-                v.preferred_locale && v.name.eq_ignore_ascii_case(DEFAULT_VOICE)
-            })
+            voices
+                .iter()
+                .position(|v| v.preferred_locale && v.name.eq_ignore_ascii_case(DEFAULT_VOICE))
         })
         .or_else(|| voices.iter().position(|v| v.preferred_locale))
 }
@@ -242,7 +242,10 @@ fn resolve_voice(preference: &str) -> Option<Retained<AVSpeechSynthesisVoice>> {
 
 /// Every selectable voice installed on this machine, for the Settings picker.
 fn list_voices_main() -> Vec<VoiceOption> {
-    collect_voices().into_iter().map(|(option, _)| option).collect()
+    collect_voices()
+        .into_iter()
+        .map(|(option, _)| option)
+        .collect()
 }
 
 /// Stop whatever is being spoken. Safe when silent.
@@ -256,10 +259,25 @@ fn stop_speaking_main() {
     });
 }
 
-fn speak_main(text: String, preference: String) -> VoiceSpeech {
+/// Is the synthesizer still producing audio?
+fn is_speaking_main() -> bool {
+    SYNTH.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .is_some_and(|synth| unsafe { synth.isSpeaking() })
+    })
+}
+
+fn speak_main(app: &AppHandle, text: String, preference: String) -> VoiceSpeech {
     // The guard that keeps NEXUS from hearing itself. Checked here, at the
     // last possible moment before audio is produced, rather than in the UI.
-    if super::is_listening() {
+    //
+    // In always-listening the microphone is open by definition, so refusing
+    // to speak would mean never speaking again. It is closed for the length
+    // of the reply instead, and the supervisor reopens it afterwards.
+    if super::always_listening() {
+        super::mute_for_speech(app);
+    } else if super::is_listening() {
         return VoiceSpeech {
             spoken: false,
             text,
@@ -268,9 +286,7 @@ fn speak_main(text: String, preference: String) -> VoiceSpeech {
     }
 
     let voice = resolve_voice(&preference);
-    let voice_name = voice
-        .as_ref()
-        .map(|v| unsafe { v.name() }.to_string());
+    let voice_name = voice.as_ref().map(|v| unsafe { v.name() }.to_string());
 
     SYNTH.with(|cell| {
         let mut slot = cell.borrow_mut();
@@ -283,7 +299,8 @@ fn speak_main(text: String, preference: String) -> VoiceSpeech {
             // half-sentence is worse than a clean cut.
             synth.stopSpeakingAtBoundary(AVSpeechBoundary::Immediate);
 
-            let utterance = AVSpeechUtterance::speechUtteranceWithString(&NSString::from_str(&text));
+            let utterance =
+                AVSpeechUtterance::speechUtteranceWithString(&NSString::from_str(&text));
             utterance.setVoice(voice.as_deref());
             synth.speakUtterance(&utterance);
         }
@@ -299,11 +316,40 @@ fn speak_main(text: String, preference: String) -> VoiceSpeech {
 // -- Public API, all main-thread hops ----------------------------------------
 
 pub fn speak(app: &AppHandle, text: String, preference: String) -> Result<VoiceSpeech, String> {
-    super::run_main(app, move || speak_main(text, preference))
+    let inner = app.clone();
+    let spoken = super::run_main(app, move || speak_main(&inner, text, preference))?;
+    if spoken.spoken && super::always_listening() {
+        watch_until_silent(app.clone());
+    }
+    Ok(spoken)
+}
+
+/// Hold the microphone closed until the reply has actually finished.
+///
+/// AVSpeechSynthesizer gives no completion without a delegate, and adding
+/// one means a new Objective-C class. Polling `isSpeaking` costs a main
+/// thread hop every 150ms for the length of a one-line answer.
+fn watch_until_silent(app: AppHandle) {
+    std::thread::spawn(move || {
+        // Bounded so a wedged synthesizer cannot leave the microphone shut
+        // forever. Answers are one or two sentences; this is far above that.
+        for _ in 0..200 {
+            std::thread::sleep(Duration::from_millis(150));
+            match super::run_main(&app, is_speaking_main) {
+                Ok(true) => continue,
+                _ => break,
+            }
+        }
+        super::unmute_after_speech();
+    });
 }
 
 pub fn stop_speaking(app: &AppHandle) -> Result<(), String> {
-    super::run_main(app, stop_speaking_main)
+    let result = super::run_main(app, stop_speaking_main);
+    // Whoever cut the reply short wants to talk, so reopen at once rather
+    // than waiting for the poll to notice.
+    super::unmute_after_speech();
+    result
 }
 
 pub fn list_voices(app: &AppHandle) -> Result<Vec<VoiceOption>, String> {
@@ -330,7 +376,10 @@ mod tests {
 
     #[test]
     fn quality_labels_cover_every_tier() {
-        assert_eq!(quality_label(AVSpeechSynthesisVoiceQuality::Default), "default");
+        assert_eq!(
+            quality_label(AVSpeechSynthesisVoiceQuality::Default),
+            "default"
+        );
         assert_eq!(
             quality_label(AVSpeechSynthesisVoiceQuality::Enhanced),
             "enhanced"
@@ -466,9 +515,15 @@ mod tests {
             "com.apple.speech.synthesis.voice.Zarvox",
             "en-US"
         ));
-        assert!(!selectable("com.apple.speech.synthesis.voice.Bells", "en-US"));
+        assert!(!selectable(
+            "com.apple.speech.synthesis.voice.Bells",
+            "en-US"
+        ));
         assert!(selectable("com.apple.voice.compact.en-IN.Rishi", "en-IN"));
-        assert!(selectable("com.apple.voice.compact.en-US.Samantha", "en-US"));
+        assert!(selectable(
+            "com.apple.voice.compact.en-US.Samantha",
+            "en-US"
+        ));
         assert!(selectable("com.apple.eloquence.en-GB.Flo", "en-GB"));
     }
 
@@ -488,7 +543,10 @@ mod tests {
             "unspecified"
         );
         // A future macOS tier must not panic or be mislabelled.
-        assert_eq!(gender_label(AVSpeechSynthesisVoiceGender(99)), "unspecified");
+        assert_eq!(
+            gender_label(AVSpeechSynthesisVoiceGender(99)),
+            "unspecified"
+        );
     }
 
     #[test]

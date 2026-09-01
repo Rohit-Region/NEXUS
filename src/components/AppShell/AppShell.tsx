@@ -7,6 +7,7 @@ import { CommandPalette } from '../CommandPalette/CommandPalette';
 import { AssistantPanel } from '../AssistantPanel/AssistantPanel';
 import { VoiceController } from '../VoiceController/VoiceController';
 import type { NexusView } from '../../types';
+import { Sidebar } from '../Sidebar/Sidebar';
 import type { Settings } from '../../types/db';
 import './AppShell.css';
 
@@ -41,10 +42,15 @@ export function AppShell({
   // NEXUS-010. AppShell holds plain state only; VoiceController owns the IPC,
   // so the no-nexus-db rule still holds here.
   const [voiceActive, setVoiceActive] = useState(false);
+  // Bumped whenever the assistant asks the user something, so the voice
+  // controller can open the microphone for the answer. A counter, because
+  // two questions in a row must each reopen it.
+  const [expectAnswer, setExpectAnswer] = useState(0);
   // NEXUS-014. The conversation surface. Still plain state: VoiceController
   // and AssistantPanel own their own IPC, so the no-nexus-db rule holds here.
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [spokenText, setSpokenText] = useState<string | null>(null);
+
 
   /**
    * A final transcript now goes to the assistant rather than the palette.
@@ -91,7 +97,17 @@ export function AppShell({
   const showBadge = view.screen === 'project-detail' && activeProjectName !== null;
 
   return (
-    <div className="app-shell">
+    <div className="app-shell app-shell--railed">
+      {/* The permanent rail. Grouped navigation plus live connector dots,
+          which are the only always-visible answer to "is Jira working". */}
+      <Sidebar
+        view={view}
+        navigate={navigate}
+        onOpenAssistant={() => setAssistantOpen(true)}
+        suggestionCount={0}
+      />
+
+      <div className="app-shell__column">
       <header className="app-shell__header">
         <Logo />
 
@@ -173,20 +189,25 @@ export function AppShell({
         assistantOpen={assistantOpen}
         onOpenAssistant={() => setAssistantOpen((prev) => !prev)}
       />
+      </div>
 
       <AssistantPanel
         open={assistantOpen}
         onClose={() => setAssistantOpen(false)}
+        onOpen={() => setAssistantOpen(true)}
         navigate={navigate}
         voiceEnabled={settings.voiceEnabled}
         voiceActive={voiceActive}
         onVoiceToggle={() => setVoiceActive((prev) => !prev)}
         spokenText={spokenText}
         onSpokenConsumed={() => setSpokenText(null)}
+        onExpectAnswer={() => setExpectAnswer((n) => n + 1)}
       />
 
       <VoiceController
         enabled={settings.voiceEnabled}
+        alwaysListening={settings.alwaysListening}
+        expectAnswer={expectAnswer}
         active={voiceActive}
         onActiveChange={setVoiceActive}
         onFinalTranscript={handleFinalTranscript}

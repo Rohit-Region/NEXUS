@@ -278,6 +278,46 @@ export function SettingsForm({
           confirmation.
         </span>
 
+        <label className="settings-form__toggle">
+          <input
+            type="checkbox"
+            checked={values.alwaysListening}
+            onChange={(e) => setField('alwaysListening', e.target.checked)}
+            disabled={submitting || !values.voiceEnabled}
+          />
+          <span className="settings-form__label">
+            Always listening for &ldquo;Nexus&rdquo;
+          </span>
+        </label>
+        <span className="settings-form__hint">
+          Keeps the microphone open so you can call NEXUS by name instead of
+          pressing the button. Only sentences that start with
+          &ldquo;Nexus&rdquo; are acted on; everything else it hears is
+          discarded without being matched or shown. Recognition stays on this
+          Mac, and still nothing is stored. Expect noticeably more battery use
+          on an unplugged laptop.
+        </span>
+
+        <div className="settings-form__field">
+          <label className="settings-form__label" htmlFor="settings-wake-replies">
+            Replies when called
+          </label>
+          <textarea
+            id="settings-wake-replies"
+            className="nexus-input"
+            rows={3}
+            value={values.wakeReplies.join('\n')}
+            onChange={(e) =>
+              setField('wakeReplies', e.target.value.split('\n'))
+            }
+            disabled={submitting || !values.voiceEnabled || !values.alwaysListening}
+          />
+          <span className="settings-form__hint">
+            One per line, spoken in rotation. Blank lines are ignored; clearing
+            the field restores the defaults.
+          </span>
+        </div>
+
         <div className="settings-form__field">
           <label className="settings-form__label" htmlFor="settings-voice-name">
             Response voice

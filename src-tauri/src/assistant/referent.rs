@@ -130,7 +130,13 @@ fn normalize(phrase: &str) -> Vec<String> {
     phrase
         .to_lowercase()
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '#' { c } else { ' ' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '#' {
+                c
+            } else {
+                ' '
+            }
+        })
         .collect::<String>()
         .split_whitespace()
         .map(|s| s.to_string())
@@ -143,16 +149,26 @@ fn normalize(phrase: &str) -> Vec<String> {
 /// is not read as "open the 8792nd thing".
 fn ordinal(tokens: &[String]) -> Option<usize> {
     const WORDS: [(&str, usize); 20] = [
-        ("first", 1), ("1st", 1),
-        ("second", 2), ("2nd", 2),
-        ("third", 3), ("3rd", 3),
-        ("fourth", 4), ("4th", 4),
-        ("fifth", 5), ("5th", 5),
-        ("sixth", 6), ("6th", 6),
-        ("seventh", 7), ("7th", 7),
-        ("eighth", 8), ("8th", 8),
-        ("ninth", 9), ("9th", 9),
-        ("tenth", 10), ("10th", 10),
+        ("first", 1),
+        ("1st", 1),
+        ("second", 2),
+        ("2nd", 2),
+        ("third", 3),
+        ("3rd", 3),
+        ("fourth", 4),
+        ("4th", 4),
+        ("fifth", 5),
+        ("5th", 5),
+        ("sixth", 6),
+        ("6th", 6),
+        ("seventh", 7),
+        ("7th", 7),
+        ("eighth", 8),
+        ("8th", 8),
+        ("ninth", 9),
+        ("9th", 9),
+        ("tenth", 10),
+        ("10th", 10),
     ];
 
     for (index, token) in tokens.iter().enumerate() {
@@ -303,7 +319,11 @@ pub fn resolve(phrase: &str, referents: &[Referent], lists: &[RenderedList]) -> 
     //    recent thing of any kind.
     if let Some(implied) = pronoun(&tokens) {
         let matches: Vec<Referent> = match implied {
-            Some(kind) => referents.iter().filter(|r| r.kind == kind).cloned().collect(),
+            Some(kind) => referents
+                .iter()
+                .filter(|r| r.kind == kind)
+                .cloned()
+                .collect(),
             None => referents.to_vec(),
         };
         if matches.is_empty() && implied == Some(ReferentKind::Person) {
@@ -339,7 +359,7 @@ mod tests {
     fn attention_list() -> (Vec<Referent>, Vec<RenderedList>) {
         let referents = vec![
             referent(1, ReferentKind::PullRequest, "PR #8792", 1),
-            referent(2, ReferentKind::JiraIssue, "KAI-515", 1),
+            referent(2, ReferentKind::JiraIssue, "PROJ-515", 1),
             referent(3, ReferentKind::Project, "AdminService", 1),
             referent(4, ReferentKind::Person, "Alec", 1),
         ];
@@ -369,8 +389,11 @@ mod tests {
     #[test]
     fn do_the_first_one_indexes_the_rendered_list() {
         let (r, l) = attention_list();
-        assert_eq!(resolved_name(&resolve("do the first one", &r, &l)), "PR #8792");
-        assert_eq!(resolved_name(&resolve("the second one", &r, &l)), "KAI-515");
+        assert_eq!(
+            resolved_name(&resolve("do the first one", &r, &l)),
+            "PR #8792"
+        );
+        assert_eq!(resolved_name(&resolve("the second one", &r, &l)), "PROJ-515");
         assert_eq!(resolved_name(&resolve("third", &r, &l)), "AdminService");
     }
 
@@ -384,7 +407,11 @@ mod tests {
     fn a_ticket_and_an_issue_and_jira_all_name_the_same_kind() {
         let (r, l) = attention_list();
         for phrase in ["open the ticket", "open the issue", "show me the jira"] {
-            assert_eq!(resolved_name(&resolve(phrase, &r, &l)), "KAI-515", "{phrase}");
+            assert_eq!(
+                resolved_name(&resolve(phrase, &r, &l)),
+                "PROJ-515",
+                "{phrase}"
+            );
         }
     }
 
@@ -415,7 +442,7 @@ mod tests {
     fn number_three_and_hash_three_both_count() {
         let (r, l) = attention_list();
         assert_eq!(resolved_name(&resolve("number 3", &r, &l)), "AdminService");
-        assert_eq!(resolved_name(&resolve("#2", &r, &l)), "KAI-515");
+        assert_eq!(resolved_name(&resolve("#2", &r, &l)), "PROJ-515");
     }
 
     #[test]
@@ -423,7 +450,10 @@ mod tests {
         // "open 8792" must not mean "open the 8792nd thing".
         let (r, l) = attention_list();
         let resolution = resolve("open 8792", &r, &l);
-        assert!(matches!(resolution, Resolution::Unresolved { .. }), "{resolution:?}");
+        assert!(
+            matches!(resolution, Resolution::Unresolved { .. }),
+            "{resolution:?}"
+        );
     }
 
     #[test]
@@ -431,10 +461,21 @@ mod tests {
         let mut r = attention_list().0;
         r.push(referent(9, ReferentKind::Task, "Ship it", 4));
         let lists = vec![
-            RenderedList { id: 1, turn: 1, items: vec![1, 2, 3] },
-            RenderedList { id: 2, turn: 4, items: vec![9] },
+            RenderedList {
+                id: 1,
+                turn: 1,
+                items: vec![1, 2, 3],
+            },
+            RenderedList {
+                id: 2,
+                turn: 4,
+                items: vec![9],
+            },
         ];
-        assert_eq!(resolved_name(&resolve("the first one", &r, &lists)), "Ship it");
+        assert_eq!(
+            resolved_name(&resolve("the first one", &r, &lists)),
+            "Ship it"
+        );
     }
 
     // -- Ambiguity -----------------------------------------------------------
@@ -450,8 +491,7 @@ mod tests {
         match resolve("open the PR", &r, &[]) {
             Resolution::Ambiguous { candidates } => {
                 assert_eq!(candidates.len(), 2);
-                let names: Vec<&str> =
-                    candidates.iter().map(|c| c.display_name.as_str()).collect();
+                let names: Vec<&str> = candidates.iter().map(|c| c.display_name.as_str()).collect();
                 assert!(names.contains(&"PR #8792") && names.contains(&"PR #8801"));
             }
             other => panic!("expected ambiguity, got {other:?}"),
@@ -515,14 +555,20 @@ mod tests {
     fn an_empty_phrase_is_handled() {
         let (r, l) = attention_list();
         assert!(matches!(resolve("", &r, &l), Resolution::Unresolved { .. }));
-        assert!(matches!(resolve("   ", &r, &l), Resolution::Unresolved { .. }));
+        assert!(matches!(
+            resolve("   ", &r, &l),
+            Resolution::Unresolved { .. }
+        ));
     }
 
     #[test]
     fn a_phrase_naming_nothing_says_so() {
         let (r, l) = attention_list();
         let resolution = resolve("what is the weather", &r, &l);
-        assert!(matches!(resolution, Resolution::Unresolved { .. }), "{resolution:?}");
+        assert!(
+            matches!(resolution, Resolution::Unresolved { .. }),
+            "{resolution:?}"
+        );
     }
 
     #[test]
@@ -543,10 +589,17 @@ mod tests {
         // more than it should.
         let (r, l) = attention_list();
         for phrase in ["Open THE PR!", "open the pr?", "  The   Pr  "] {
-            assert_eq!(resolved_name(&resolve(phrase, &r, &l)), "PR #8792", "{phrase}");
+            assert_eq!(
+                resolved_name(&resolve(phrase, &r, &l)),
+                "PR #8792",
+                "{phrase}"
+            );
         }
         assert!(
-            matches!(resolve("open the p.r.", &r, &l), Resolution::Unresolved { .. }),
+            matches!(
+                resolve("open the p.r.", &r, &l),
+                Resolution::Unresolved { .. }
+            ),
             "single letters must not be read as abbreviations"
         );
     }

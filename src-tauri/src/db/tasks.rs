@@ -88,15 +88,15 @@ fn get_task_by_id(conn: &Connection, id: i64) -> Result<Task, String> {
 
 fn map_task_row(row: &rusqlite::Row<'_>) -> RusqliteResult<Task> {
     Ok(Task {
-        id:             row.get(0)?,
-        external_id:    row.get(1)?,
-        title:          row.get(2)?,
-        description:    row.get(3)?,
-        status:         row.get(4)?,
-        project_id:     row.get(5)?,
+        id: row.get(0)?,
+        external_id: row.get(1)?,
+        title: row.get(2)?,
+        description: row.get(3)?,
+        status: row.get(4)?,
+        project_id: row.get(5)?,
         assigned_agent: row.get(6)?,
-        created_at:     row.get(7)?,
-        updated_at:     row.get(8)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
     })
 }
 
@@ -227,10 +227,7 @@ pub fn update_task_status(
 /// `update_task` keeps its guarantee of never writing `external_id` or
 /// `assigned_agent` (spec 2.5, N-09). Same column-list discipline applies here:
 /// `external_id` is not in this statement either.
-pub fn assign_task_agent(
-    conn: &Connection,
-    input: &AssignTaskAgentInput,
-) -> Result<Task, String> {
+pub fn assign_task_agent(conn: &Connection, input: &AssignTaskAgentInput) -> Result<Task, String> {
     let result = conn.execute(
         "UPDATE tasks
             SET assigned_agent = ?1,
@@ -320,10 +317,16 @@ mod tests {
         )
         .expect("insert task");
 
-        assert_eq!(task.status, "open", "omitted status must use the schema default");
+        assert_eq!(
+            task.status, "open",
+            "omitted status must use the schema default"
+        );
         assert_eq!(task.title, "Untrimmed", "title must be trimmed");
         assert_eq!(task.project_id, project_id);
-        assert_eq!(task.external_id, None, "UI-created tasks must leave external_id NULL");
+        assert_eq!(
+            task.external_id, None,
+            "UI-created tasks must leave external_id NULL"
+        );
         assert_eq!(
             task.assigned_agent, None,
             "UI-created tasks must leave assigned_agent NULL"
@@ -391,8 +394,14 @@ mod tests {
         )
         .expect_err("unknown status must be rejected");
 
-        assert!(err.contains("Invalid task status: wontfix"), "unexpected error: {err}");
-        assert!(err.contains("in_progress"), "error must name the vocabulary: {err}");
+        assert!(
+            err.contains("Invalid task status: wontfix"),
+            "unexpected error: {err}"
+        );
+        assert!(
+            err.contains("in_progress"),
+            "error must name the vocabulary: {err}"
+        );
         assert!(list_tasks(&conn, project_id).expect("list").is_empty());
     }
 
@@ -438,7 +447,10 @@ mod tests {
         assert_eq!(updated.title, "After");
         assert_eq!(updated.description.as_deref(), Some("changed"));
         assert_eq!(updated.status, "in_progress");
-        assert_eq!(updated.project_id, project_id, "update must not move the task");
+        assert_eq!(
+            updated.project_id, project_id,
+            "update must not move the task"
+        );
         assert_eq!(
             updated.created_at, created.created_at,
             "created_at must not change on update"
@@ -548,7 +560,10 @@ mod tests {
             },
         )
         .expect_err("unknown status must be rejected");
-        assert!(err.contains("Invalid task status"), "unexpected error: {err}");
+        assert!(
+            err.contains("Invalid task status"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
@@ -625,13 +640,18 @@ mod tests {
         )
         .expect("insert task");
         let task_id = conn.last_insert_rowid();
-        let before = list_tasks(&conn, project_id).expect("list")[0].updated_at.clone();
+        let before = list_tasks(&conn, project_id).expect("list")[0]
+            .updated_at
+            .clone();
 
         std::thread::sleep(std::time::Duration::from_millis(5));
 
         let assigned = assign_task_agent(
             &conn,
-            &AssignTaskAgentInput { id: task_id, agent_id: Some(agent_id) },
+            &AssignTaskAgentInput {
+                id: task_id,
+                agent_id: Some(agent_id),
+            },
         )
         .expect("assign agent");
 
@@ -648,11 +668,17 @@ mod tests {
 
         let cleared = assign_task_agent(
             &conn,
-            &AssignTaskAgentInput { id: task_id, agent_id: None },
+            &AssignTaskAgentInput {
+                id: task_id,
+                agent_id: None,
+            },
         )
         .expect("clear agent");
 
-        assert_eq!(cleared.assigned_agent, None, "None must clear the assignment");
+        assert_eq!(
+            cleared.assigned_agent, None,
+            "None must clear the assignment"
+        );
         assert_eq!(cleared.external_id.as_deref(), Some("JIRA-7"));
     }
 
@@ -664,7 +690,10 @@ mod tests {
 
         let err = assign_task_agent(
             &conn,
-            &AssignTaskAgentInput { id: task.id, agent_id: Some(9999) },
+            &AssignTaskAgentInput {
+                id: task.id,
+                agent_id: Some(9999),
+            },
         )
         .expect_err("dangling agent_id must be rejected");
 

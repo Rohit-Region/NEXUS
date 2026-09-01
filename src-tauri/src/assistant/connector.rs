@@ -70,6 +70,42 @@ pub struct ExecCtx<'a> {
     pub conn: &'a Connection,
 }
 
+/// An action a bare "yes" may run next, and what to run it with.
+///
+/// It carries an input because the next step is not always argument-free.
+/// Pressing send in WhatsApp needs nothing; submitting a prompt needs to
+/// know which editor, and a follow-up that had to guess would be picking an
+/// application to type into, which is the wrong kind of guess.
+///
+/// The input is built by the connector from the action that just ran, never
+/// by whoever says "yes". A bare affirmation supplies no arguments and
+/// cannot redirect this anywhere.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FollowUp {
+    pub action_id: &'static str,
+    pub input: serde_json::Value,
+}
+
+/// A way out of a failure, offered by the connector that hit it.
+///
+/// NEXUS-026. Connectors already write good failure text: the Accessibility
+/// sentence names the exact settings pane to open. What was missing is that
+/// the sentence is a dead end, read out to somebody whose hands are busy.
+/// A remedy turns it into a question with an answer.
+///
+/// It is deliberately the same shape as [`FollowUp`], and reaches the user
+/// through the same mechanism, because "shall I open that for you?" is the
+/// same kind of offer as "shall I send it?". Nothing new is invented, and
+/// the remedy still passes the gate like anything else: the user is offered
+/// a fix, never given one.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Remedy {
+    /// Spoken aloud, so it ends in a question a person answers with "yes".
+    pub prompt: String,
+    pub action_id: &'static str,
+    pub input: serde_json::Value,
+}
+
 /// Something worth remembering, as the connector describes it.
 ///
 /// The gate fills in the id, the turn and the source; a connector only says
@@ -141,6 +177,69 @@ pub trait Connector: Send + Sync {
         _input: &serde_json::Value,
     ) -> Result<(), ActionError> {
         Ok(())
+    }
+
+    /// Turn this action's output into something worth reading aloud.
+    ///
+    /// NEXUS-015 defect E. Without it the assistant showed the action's
+    /// *summary* ("List open tabs") and discarded the tabs themselves, so a
+    /// working action looked like nothing had happened.
+    ///
+    /// Lives on the connector because only the connector knows the shape of
+    /// its own payload. Returning None falls back to the summary, which is
+    /// right for actions whose result is the navigation itself.
+    fn describe_result(&self, _action_id: &str, _output: &serde_json::Value) -> Option<String> {
+        None
+    }
+
+    /// Actions that can be run with no input at all.
+    ///
+    /// NEXUS-015 defect C. The deterministic resolver may offer these
+    /// directly, because a bare phrase can supply everything they need.
+    /// Actions requiring a URL, an id or a message are deliberately absent:
+    /// matching one and then failing on a missing field is worse than not
+    /// matching it, since the user gets an error instead of an offer.
+    fn zero_input_actions(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    /// The action a bare "yes" should run after this one succeeded.
+    ///
+    /// Some actions genuinely leave a question on screen. `compose_message`
+    /// puts a draft in front of the user and the only sensible next word is
+    /// "send it", but a bare affirmation names no action, so before this the
+    /// deterministic tiers matched nothing and the reply was discarded as
+    /// overheard speech.
+    ///
+    /// It lives here rather than in the Assistant Core for the usual reason:
+    /// only the connector knows that one of its actions is a step rather
+    /// than an ending. Returning `None` is right for almost everything.
+    ///
+    /// The follow-up is an offer, not an approval. It still passes the gate,
+    /// so an action with `ConfirmPolicy::Always` is confirmed exactly as it
+    /// would be from the palette. "Yes" chooses what to do; it does not
+    /// answer the question of whether to do it.
+    fn follow_up(
+        &self,
+        _action_id: &str,
+        _input: &serde_json::Value,
+        _output: &serde_json::Value,
+    ) -> Option<FollowUp> {
+        None
+    }
+
+    /// What the user could do about this failure, if anything.
+    ///
+    /// NEXUS-026. Only the connector knows what a failure of its own actually
+    /// means, so only it can say what would fix it. The core must never infer
+    /// one: a guessed remedy that does not work is worse than none, because
+    /// the user spends their attention on it.
+    ///
+    /// Returning `None` is right for most failures. A network that is down
+    /// has no remedy NEXUS can offer, and saying so plainly is the honest
+    /// answer.
+    fn remedy(&self, _action_id: &str, _error: &ActionError) -> Option<Remedy> {
+        None
     }
 
     /// Perform the action. Reached only through the gate.

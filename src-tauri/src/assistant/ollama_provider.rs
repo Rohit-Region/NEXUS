@@ -45,7 +45,7 @@ const REASON_TIMEOUT: Duration = Duration::from_secs(90);
 /// Deliberately narrow: it is told the vocabulary it may use and told to stay
 /// inside it. That is belt to the braces of `validate_plan`, which rejects
 /// anything outside the registry regardless of what the prompt said.
-const SYSTEM_PROMPT: &str = "\
+pub const SYSTEM_PROMPT: &str = "\
 You are the reasoning component of NEXUS, a local developer assistant. \
 Reply with a single JSON object and nothing else.
 
@@ -92,7 +92,7 @@ pub fn set_model(conn: &Connection, model: &str) -> Result<(), String> {
 ///
 /// Everything here came out of `build_context`, which is where the decision
 /// about what may travel is made. This only formats.
-fn render(context: &AiContext) -> String {
+pub fn render(context: &AiContext) -> String {
     let mut out = String::new();
     out.push_str("Actions you may propose:\n");
     if context.actions.is_empty() {
@@ -439,9 +439,11 @@ mod tests {
 
     #[test]
     fn a_well_formed_answer_is_unwrapped() {
-        match interpret(r#"```json
+        match interpret(
+            r#"```json
 {"kind":"answer","text":"OAuth delegates access; API keys identify a caller."}
-```"#) {
+```"#,
+        ) {
             Reasoning::Answer { text } => assert!(text.starts_with("OAuth delegates")),
             other => panic!("expected an answer, got {other:?}"),
         }
@@ -464,7 +466,8 @@ mod tests {
 
     #[test]
     fn nested_objects_are_kept_whole() {
-        let raw = r#"prefix {"kind":"plan","steps":[{"actionId":"a.b","input":{"x":{"y":1}}}]} suffix"#;
+        let raw =
+            r#"prefix {"kind":"plan","steps":[{"actionId":"a.b","input":{"x":{"y":1}}}]} suffix"#;
         let extracted = extract_json(raw).expect("found");
         assert!(extracted.ends_with("}]}"));
         assert!(serde_json::from_str::<serde_json::Value>(extracted).is_ok());

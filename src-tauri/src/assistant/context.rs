@@ -138,8 +138,8 @@ fn latest_row_id(snapshot: &SessionSnapshot, kind: ReferentKind) -> Option<i64> 
 
 /// Derive what NEXUS is working on from what it has been talking about.
 pub fn work_context(conn: &Connection, snapshot: &SessionSnapshot) -> WorkContext {
-    let current_project = latest_row_id(snapshot, ReferentKind::Project)
-        .and_then(|id| project_context(conn, id));
+    let current_project =
+        latest_row_id(snapshot, ReferentKind::Project).and_then(|id| project_context(conn, id));
     let current_task =
         latest_row_id(snapshot, ReferentKind::Task).and_then(|id| task_context(conn, id));
 
@@ -251,18 +251,29 @@ mod tests {
         let second = seed_project(&conn, "Beta");
 
         let session = AssistantSession::default();
-        session.begin_turn(TurnInput::Text { text: "a".to_string() });
-        session.remember(ReferentKind::Project, "Atlas", "nexus", json!({ "id": first }));
+        session.begin_turn(TurnInput::Text {
+            text: "a".to_string(),
+        });
+        session.remember(
+            ReferentKind::Project,
+            "Atlas",
+            "nexus",
+            json!({ "id": first }),
+        );
         session.advance(AssistantState::Completed, None, None);
-        session.begin_turn(TurnInput::Text { text: "b".to_string() });
-        session.remember(ReferentKind::Project, "Beta", "nexus", json!({ "id": second }));
+        session.begin_turn(TurnInput::Text {
+            text: "b".to_string(),
+        });
+        session.remember(
+            ReferentKind::Project,
+            "Beta",
+            "nexus",
+            json!({ "id": second }),
+        );
         session.advance(AssistantState::Completed, None, None);
 
         let context = assemble(&conn, &session, 0).expect("assemble");
-        assert_eq!(
-            context.work.current_project.expect("current").name,
-            "Beta"
-        );
+        assert_eq!(context.work.current_project.expect("current").name, "Beta");
     }
 
     #[test]
@@ -271,7 +282,9 @@ mod tests {
         seed_project(&conn, "Atlas");
 
         let session = AssistantSession::default();
-        session.begin_turn(TurnInput::Text { text: "x".to_string() });
+        session.begin_turn(TurnInput::Text {
+            text: "x".to_string(),
+        });
         // No `id` in the metadata: nothing to look up.
         session.remember(ReferentKind::Project, "Atlas", "nexus", json!({}));
         session.advance(AssistantState::Completed, None, None);
@@ -287,8 +300,15 @@ mod tests {
         let task = seed_task(&conn, project, "Ship it", "blocked");
 
         let session = AssistantSession::default();
-        session.begin_turn(TurnInput::Text { text: "x".to_string() });
-        session.remember(ReferentKind::Task, "Ship it", "nexus", json!({ "id": task }));
+        session.begin_turn(TurnInput::Text {
+            text: "x".to_string(),
+        });
+        session.remember(
+            ReferentKind::Task,
+            "Ship it",
+            "nexus",
+            json!({ "id": task }),
+        );
         session.advance(AssistantState::Completed, None, None);
 
         let current = assemble(&conn, &session, 0)

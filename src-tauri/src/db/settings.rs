@@ -32,6 +32,7 @@ use super::tasks::TASK_STATUSES;
 // The shipped voice lives with the synthesizer that resolves it, so there is
 // one definition rather than a constant here that can drift out of step.
 use crate::voice::speech::DEFAULT_VOICE;
+use crate::voice::wake::DEFAULT_REPLIES;
 
 // -- Keys and accepted values -------------------------------------------------
 
@@ -44,9 +45,11 @@ const KEY_NEW_PROJECT_DEFAULT_IDE_ID: &str = "new_project_default_ide_id";
 const KEY_NEW_PROJECT_DEFAULT_AGENT_ID: &str = "new_project_default_agent_id";
 const KEY_VOICE_ENABLED: &str = "voice_enabled";
 const KEY_VOICE_NAME: &str = "voice_name";
+const KEY_ALWAYS_LISTENING: &str = "always_listening";
+const KEY_WAKE_REPLIES: &str = "wake_replies";
 
 /// Every key this version owns. Reset and save touch these and nothing else.
-const KNOWN_KEYS: [&str; 9] = [
+const KNOWN_KEYS: [&str; 11] = [
     KEY_LAUNCH_SCREEN,
     KEY_PROJECT_SORT,
     KEY_TASK_SORT,
@@ -56,12 +59,20 @@ const KNOWN_KEYS: [&str; 9] = [
     KEY_NEW_PROJECT_DEFAULT_AGENT_ID,
     KEY_VOICE_ENABLED,
     KEY_VOICE_NAME,
+    KEY_ALWAYS_LISTENING,
+    KEY_WAKE_REPLIES,
 ];
 
 /// Longest accepted voice name or identifier. System identifiers are well
 /// under this; the cap exists so a hand-edited database cannot store an
 /// unbounded string that later reaches the synthesizer.
 const MAX_VOICE_NAME: usize = 64;
+
+/// Longest accepted acknowledgement, and how many may be stored. The
+/// synthesizer speaks these, so an unbounded string would be an unbounded
+/// spoken reply.
+const MAX_WAKE_REPLY: usize = 48;
+const MAX_WAKE_REPLIES: usize = 8;
 
 pub const LAUNCH_SCREENS: [&str; 2] = ["overview", "projects"];
 
@@ -79,8 +90,7 @@ pub const TASK_SORTS: [&str; 5] = [
     "title-asc",
     "status",
 ];
-pub const REGISTRY_SORTS: [&str; 4] =
-    ["created-desc", "created-asc", "name-asc", "type-asc"];
+pub const REGISTRY_SORTS: [&str; 4] = ["created-desc", "created-asc", "name-asc", "type-asc"];
 
 const DEFAULT_LAUNCH_SCREEN: &str = "overview";
 const DEFAULT_SORT: &str = "created-desc";
@@ -110,6 +120,12 @@ pub struct Settings {
     /// preference, not a guarantee: which voices exist differs per machine,
     /// so the synthesizer resolves it with a fallback chain at speak time.
     pub voice_name: String,
+    /// Keep the microphone open for the wake word rather than opening it
+    /// only when asked. Off by default: it is a real change to when the
+    /// microphone is live, so it is a choice the user makes once.
+    pub always_listening: bool,
+    /// What NEXUS says back when called. Rotated in order.
+    pub wake_replies: Vec<String>,
 }
 
 impl Settings {
@@ -127,6 +143,8 @@ impl Settings {
             new_project_default_agent_id: None,
             voice_enabled: false,
             voice_name: DEFAULT_VOICE.to_string(),
+            always_listening: false,
+            wake_replies: DEFAULT_REPLIES.iter().map(|s| s.to_string()).collect(),
         }
     }
 }
@@ -241,13 +259,47 @@ pub fn get_settings(conn: &Connection) -> Result<Settings, String> {
         ),
         task_status_filter: parse_status_filter(map.get(KEY_TASK_STATUS_FILTER)),
         new_project_default_ide_id: resolve(KEY_NEW_PROJECT_DEFAULT_IDE_ID, "ides")?,
-        new_project_default_agent_id: resolve(
-            KEY_NEW_PROJECT_DEFAULT_AGENT_ID,
-            "ai_agents",
-        )?,
+        new_project_default_agent_id: resolve(KEY_NEW_PROJECT_DEFAULT_AGENT_ID, "ai_agents")?,
         voice_enabled: parse_bool(map.get(KEY_VOICE_ENABLED)),
         voice_name: parse_voice_name(map.get(KEY_VOICE_NAME), &d.voice_name),
+        always_listening: parse_bool(map.get(KEY_ALWAYS_LISTENING)),
+        wake_replies: parse_wake_replies(map.get(KEY_WAKE_REPLIES), &d.wake_replies),
     })
+}
+
+/// Normalise the acknowledgement set on the way to storage, so what is read
+/// back is what the parser would have produced anyway.
+fn encode_wake_replies(replies: &[String]) -> String {
+    replies
+        .iter()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty())
+        .take(MAX_WAKE_REPLIES)
+        .map(|line| line.chars().take(MAX_WAKE_REPLY).collect::<String>())
+        .collect::<Vec<String>>()
+        .join("\n")
+}
+
+/// Tolerant read of the acknowledgement set.
+///
+/// A missing or fully blank value yields the defaults rather than an empty
+/// list: silence when called would read as "it did not hear me".
+fn parse_wake_replies(value: Option<&String>, default: &[String]) -> Vec<String> {
+    let Some(raw) = value else {
+        return default.to_vec();
+    };
+    let cleaned: Vec<String> = raw
+        .split('\n')
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty())
+        .take(MAX_WAKE_REPLIES)
+        .map(|line| line.chars().take(MAX_WAKE_REPLY).collect())
+        .collect();
+    if cleaned.is_empty() {
+        default.to_vec()
+    } else {
+        cleaned
+    }
 }
 
 /// Tolerant read of the voice preference.
@@ -261,9 +313,7 @@ fn parse_voice_name(value: Option<&String>, default: &str) -> String {
         None => default.to_string(),
         Some(v) => {
             let trimmed = v.trim();
-            if trimmed.chars().count() > MAX_VOICE_NAME
-                || trimmed.chars().any(|c| c.is_control())
-            {
+            if trimmed.chars().count() > MAX_VOICE_NAME || trimmed.chars().any(|c| c.is_control()) {
                 default.to_string()
             } else {
                 trimmed.to_string()
@@ -349,7 +399,7 @@ pub fn update_settings(conn: &mut Connection, input: &Settings) -> Result<Settin
         }
     }
 
-    let pairs: [(&str, String); 9] = [
+    let pairs: [(&str, String); 11] = [
         (KEY_LAUNCH_SCREEN, input.launch_screen.clone()),
         (KEY_PROJECT_SORT, input.project_sort.clone()),
         (KEY_TASK_SORT, input.task_sort.clone()),
@@ -368,6 +418,16 @@ pub fn update_settings(conn: &mut Connection, input: &Settings) -> Result<Settin
             if input.voice_enabled { "true" } else { "false" }.to_string(),
         ),
         (KEY_VOICE_NAME, input.voice_name.trim().to_string()),
+        (
+            KEY_ALWAYS_LISTENING,
+            if input.always_listening {
+                "true"
+            } else {
+                "false"
+            }
+            .to_string(),
+        ),
+        (KEY_WAKE_REPLIES, encode_wake_replies(&input.wake_replies)),
     ];
 
     let tx = conn
@@ -481,6 +541,84 @@ mod tests {
         assert_eq!(row_count(&conn), 0, "a read must not write (N-13)");
     }
 
+    // -- Always-listening and the wake replies -------------------------------
+
+    #[test]
+    fn always_listening_is_off_on_a_fresh_install() {
+        // The microphone staying open is a real change to when it is live,
+        // so it must never arrive switched on.
+        let conn = test_conn();
+        assert!(!get_settings(&conn).expect("get").always_listening);
+        assert!(!Settings::defaults().always_listening);
+    }
+
+    #[test]
+    fn a_bogus_always_listening_value_reads_as_off() {
+        let conn = test_conn();
+        for bogus in ["yes", "1", "TRUE", "", "maybe"] {
+            put(&conn, KEY_ALWAYS_LISTENING, bogus);
+            assert!(
+                !get_settings(&conn).expect("get").always_listening,
+                "{bogus} must not enable the microphone"
+            );
+        }
+        put(&conn, KEY_ALWAYS_LISTENING, "true");
+        assert!(get_settings(&conn).expect("get").always_listening);
+    }
+
+    #[test]
+    fn the_replies_default_when_absent_or_blank() {
+        // Answering to its name with silence would read as not having heard.
+        let conn = test_conn();
+        let expected: Vec<String> = DEFAULT_REPLIES.iter().map(|s| s.to_string()).collect();
+        assert_eq!(get_settings(&conn).expect("get").wake_replies, expected);
+        for blank in ["", "\n", "   \n  \n"] {
+            put(&conn, KEY_WAKE_REPLIES, blank);
+            assert_eq!(get_settings(&conn).expect("get").wake_replies, expected);
+        }
+    }
+
+    #[test]
+    fn replies_are_stored_one_per_line_and_trimmed() {
+        let conn = test_conn();
+        put(&conn, KEY_WAKE_REPLIES, "  Sir  \n\nYep\n");
+        assert_eq!(
+            get_settings(&conn).expect("get").wake_replies,
+            vec!["Sir".to_string(), "Yep".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_hand_edited_database_cannot_store_an_unbounded_spoken_reply() {
+        // The synthesizer speaks whatever comes back, so the cap is the only
+        // thing between a stray value and a very long spoken answer.
+        let conn = test_conn();
+        let long = "x".repeat(500);
+        let many: Vec<String> = (0..40).map(|i| format!("reply {i}")).collect();
+        put(
+            &conn,
+            KEY_WAKE_REPLIES,
+            &format!("{long}\n{}", many.join("\n")),
+        );
+        let got = get_settings(&conn).expect("get").wake_replies;
+        assert!(got.len() <= MAX_WAKE_REPLIES, "{} replies", got.len());
+        assert!(got.iter().all(|r| r.chars().count() <= MAX_WAKE_REPLY));
+    }
+
+    #[test]
+    fn the_default_replies_match_the_frontend() {
+        // Same reason as the voice-name parity test: settings that fail to
+        // load must not make NEXUS answer differently from settings that
+        // load empty.
+        let ts = include_str!("../../../src/types/index.ts");
+        for reply in DEFAULT_REPLIES {
+            assert!(
+                ts.contains(&format!("'{reply}'")),
+                "DEFAULT_SETTINGS.wakeReplies in src/types/index.ts must contain {reply}"
+            );
+        }
+    }
+
     #[test]
     fn update_then_get_round_trips() {
         let mut conn = test_conn();
@@ -497,9 +635,13 @@ mod tests {
             new_project_default_agent_id: Some(agent),
             voice_enabled: true,
             voice_name: "Rishi".to_string(),
+            always_listening: true,
+            wake_replies: vec!["Yes chief".to_string()],
         };
 
         let saved = update_settings(&mut conn, &input).expect("update");
+        assert!(saved.always_listening);
+        assert_eq!(saved.wake_replies, vec!["Yes chief".to_string()]);
         assert_eq!(saved.launch_screen, "projects");
         assert_eq!(saved.project_sort, "name-asc");
         assert_eq!(saved.task_sort, "status");
@@ -594,7 +736,10 @@ mod tests {
 
         put(&conn, KEY_TASK_STATUS_FILTER, "archived");
         assert!(
-            get_settings(&conn).expect("get").task_status_filter.is_empty(),
+            get_settings(&conn)
+                .expect("get")
+                .task_status_filter
+                .is_empty(),
             "all-unknown yields no filtering, not no results"
         );
 
@@ -621,7 +766,9 @@ mod tests {
         let conn = test_conn();
         put(&conn, KEY_NEW_PROJECT_DEFAULT_AGENT_ID, "");
         assert_eq!(
-            get_settings(&conn).expect("get").new_project_default_agent_id,
+            get_settings(&conn)
+                .expect("get")
+                .new_project_default_agent_id,
             None
         );
     }
@@ -669,7 +816,10 @@ mod tests {
             .expect("delete ide");
 
         let s = get_settings(&conn).expect("get");
-        assert_eq!(s.new_project_default_ide_id, None, "dangling resolves to none");
+        assert_eq!(
+            s.new_project_default_ide_id, None,
+            "dangling resolves to none"
+        );
         assert_eq!(
             s.launch_screen, "projects",
             "every other setting must be unaffected"
@@ -682,7 +832,11 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("row must still exist");
-        assert_eq!(stale, ide.to_string(), "the read must not have rewritten it");
+        assert_eq!(
+            stale,
+            ide.to_string(),
+            "the read must not have rewritten it"
+        );
     }
 
     #[test]
@@ -700,7 +854,9 @@ mod tests {
         .expect("delete agent");
 
         assert_eq!(
-            get_settings(&conn).expect("get").new_project_default_agent_id,
+            get_settings(&conn)
+                .expect("get")
+                .new_project_default_agent_id,
             None
         );
     }
@@ -737,7 +893,10 @@ mod tests {
 
         let err = update_settings(&mut conn, &input).expect_err("must reject");
         assert!(err.contains("Invalid launch screen: dashboard"), "{err}");
-        assert!(err.contains("overview"), "must name the accepted set: {err}");
+        assert!(
+            err.contains("overview"),
+            "must name the accepted set: {err}"
+        );
         assert_eq!(row_count(&conn), 0, "no row may be written");
     }
 
@@ -771,7 +930,10 @@ mod tests {
 
         let err = update_settings(&mut conn, &input).expect_err("must reject");
         assert!(err.contains("Invalid task status: archived"), "{err}");
-        assert!(err.contains("in_progress"), "must name the vocabulary: {err}");
+        assert!(
+            err.contains("in_progress"),
+            "must name the vocabulary: {err}"
+        );
         assert_eq!(row_count(&conn), 0);
     }
 
@@ -992,5 +1154,4 @@ mod tests {
         let after = reset_settings(&mut conn).expect("reset");
         assert_eq!(after.voice_name, DEFAULT_VOICE);
     }
-
 }

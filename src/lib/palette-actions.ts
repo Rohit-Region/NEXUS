@@ -36,6 +36,14 @@ export function actionForCommand(commandId: string): ActionRequest | null {
   const direct = DIRECT[commandId];
   if (direct) return { actionId: direct };
 
+  // NEXUS-015 defect C. A dotted id is already a typed action id, not a
+  // palette registry id: connector actions reach the assistant directly and
+  // need no mapping. Checked before the create-task prefix so a connector
+  // can never be shadowed by a registry naming collision.
+  if (/^[a-z]+\.[a-z_]+$/.test(commandId)) {
+    return { actionId: commandId };
+  }
+
   if (commandId.startsWith(CREATE_TASK_PREFIX)) {
     const raw = commandId.slice(CREATE_TASK_PREFIX.length);
     const projectId = Number(raw);

@@ -1,4 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
+import { RemindersPanel } from '../RemindersPanel/RemindersPanel';
+import { Scan } from '../Scan/Scan';
+import { CoreHud } from '../CoreHud/CoreHud';
+import { WeatherCard } from '../WeatherCard/WeatherCard';
+import { NexusSays } from '../NexusSays/NexusSays';
+import { LiveActivity } from '../LiveActivity/LiveActivity';
 import { FolderPlus, RefreshCw } from 'lucide-react';
 import { getWorkspaceSummary, listRecentTasks } from '../../lib/nexus-db';
 import type { NexusView } from '../../types';
@@ -10,11 +16,16 @@ import './OverviewScreen.css';
 
 interface OverviewScreenProps {
   navigate: (view: NexusView) => void;
+  /** Opens the assistant panel, for the suggestion card's call to action. */
+  onOpenAssistant?: () => void;
 }
 
 const RECENT_TASK_LIMIT = 8;
 
-export function OverviewScreen({ navigate }: OverviewScreenProps) {
+export function OverviewScreen({
+  navigate,
+  onOpenAssistant = () => {},
+}: OverviewScreenProps) {
   const [summary, setSummary] = useState<WorkspaceSummary | null>(null);
   const [recent, setRecent] = useState<TaskWithProject[]>([]);
   const [loading, setLoading] = useState(true);
@@ -84,7 +95,7 @@ export function OverviewScreen({ navigate }: OverviewScreenProps) {
       )}
 
       {loading && !summary && (
-        <p className="overview__loading">Loading workspace summary...</p>
+        <Scan label="Reading workspace" rows={4} />
       )}
 
       {summary && isEmpty && (
@@ -107,6 +118,25 @@ export function OverviewScreen({ navigate }: OverviewScreenProps) {
 
       {summary && !isEmpty && (
         <>
+          {/* The command centre: three columns around the core. Weather and
+              the assistant's own voice flank it, because those are the two
+              things a person wants before they have decided what to do. */}
+          <div className="cc">
+            <div className="cc__left">
+              <WeatherCard />
+            </div>
+
+            <CoreHud
+              summary={summary}
+              navigate={(screen) => navigate({ screen })}
+            />
+
+            <div className="cc__right">
+              <NexusSays onOpenAssistant={onOpenAssistant} />
+              <LiveActivity />
+            </div>
+          </div>
+
           <div className="overview__tiles">
             <StatTile label="Projects" value={summary.projects} accent />
             <StatTile
@@ -145,6 +175,12 @@ export function OverviewScreen({ navigate }: OverviewScreenProps) {
               </span>
             </div>
           </div>
+
+          {/* Above recent activity, not inside it: a reminder is something
+              NEXUS will do, and a task is something that happened. Mixing
+              two tenses in one list makes both harder to scan. It renders
+              nothing at all when there is nothing pending. */}
+          <RemindersPanel />
 
           <div className="overview__section">
             <span className="overview__section-title">Recent activity</span>

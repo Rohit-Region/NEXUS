@@ -42,10 +42,7 @@ pub struct UpdateProjectInput {
 }
 
 /// Insert a new project and return the full row.
-pub fn insert_project(
-    conn: &Connection,
-    input: &CreateProjectInput,
-) -> Result<Project, String> {
+pub fn insert_project(conn: &Connection, input: &CreateProjectInput) -> Result<Project, String> {
     conn.execute(
         "INSERT INTO projects (name, description, repository_path, repository_url,
                                default_ide_id, default_agent_id)
@@ -87,10 +84,7 @@ pub fn list_projects(conn: &Connection) -> Result<Vec<Project>, String> {
 /// Update an existing project and return the full updated row.
 /// `updated_at` is set explicitly by the UPDATE statement; SQLite has no
 /// ON UPDATE default and NEXUS deliberately uses no triggers.
-pub fn update_project(
-    conn: &Connection,
-    input: &UpdateProjectInput,
-) -> Result<Project, String> {
+pub fn update_project(conn: &Connection, input: &UpdateProjectInput) -> Result<Project, String> {
     let name = input.name.trim();
     if name.is_empty() {
         return Err("Project name cannot be empty".to_string());
@@ -174,7 +168,13 @@ pub fn count_all_tables(conn: &Connection) -> Result<TableCounts, String> {
         .query_row("SELECT COUNT(*) FROM settings", [], |r| r.get::<_, i64>(0))
         .map_err(|e| format!("count settings: {e}"))?;
 
-    Ok(TableCounts { projects, tasks, ai_agents, ides, settings })
+    Ok(TableCounts {
+        projects,
+        tasks,
+        ai_agents,
+        ides,
+        settings,
+    })
 }
 
 // ── Private helpers ──────────────────────────────────────────────────────────
@@ -192,15 +192,15 @@ fn get_project_by_id(conn: &Connection, id: i64) -> Result<Project, String> {
 
 fn map_project_row(row: &rusqlite::Row<'_>) -> RusqliteResult<Project> {
     Ok(Project {
-        id:               row.get(0)?,
-        name:             row.get(1)?,
-        description:      row.get(2)?,
-        repository_path:  row.get(3)?,
-        repository_url:   row.get(4)?,
-        default_ide_id:   row.get(5)?,
+        id: row.get(0)?,
+        name: row.get(1)?,
+        description: row.get(2)?,
+        repository_path: row.get(3)?,
+        repository_url: row.get(4)?,
+        default_ide_id: row.get(5)?,
         default_agent_id: row.get(6)?,
-        created_at:       row.get(7)?,
-        updated_at:       row.get(8)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
     })
 }
 
@@ -419,8 +419,11 @@ mod tests {
     #[test]
     fn insert_and_update_project_carry_defaults() {
         let conn = test_conn();
-        conn.execute("INSERT INTO ides (name, ide_type) VALUES ('I', 'editor')", [])
-            .expect("insert ide");
+        conn.execute(
+            "INSERT INTO ides (name, ide_type) VALUES ('I', 'editor')",
+            [],
+        )
+        .expect("insert ide");
         let ide_id = conn.last_insert_rowid();
         conn.execute(
             "INSERT INTO ai_agents (name, agent_type) VALUES ('A', 'assistant')",

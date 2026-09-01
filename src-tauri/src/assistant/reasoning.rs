@@ -183,10 +183,7 @@ pub fn build_context(
     context: &AssistantContext,
     catalogue: &[(String, String)],
 ) -> AiContext {
-    let mut categories = vec![
-        ContextCategory::Request,
-        ContextCategory::ActionCatalogue,
-    ];
+    let mut categories = vec![ContextCategory::Request, ContextCategory::ActionCatalogue];
 
     let request_text: String = request.chars().take(MAX_REQUEST_CHARS).collect();
 
@@ -305,11 +302,9 @@ const KEY_EXTERNAL_ALLOWED: &str = "ai_external_allowed";
 const KEY_CONTENT_ALLOWED: &str = "ai_content_allowed";
 
 fn read_flag(conn: &Connection, key: &str) -> bool {
-    conn.query_row(
-        "SELECT value FROM settings WHERE key = ?1",
-        [key],
-        |row| row.get::<_, String>(0),
-    )
+    conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| {
+        row.get::<_, String>(0)
+    })
     .map(|v| v == "true")
     .unwrap_or(false)
 }
@@ -368,6 +363,13 @@ pub fn providers(conn: &Connection) -> Vec<Box<dyn ReasoningProvider>> {
     let mut out: Vec<Box<dyn ReasoningProvider>> = vec![Box::new(
         super::ollama_provider::OllamaProvider::from_settings(conn),
     )];
+    // Claude Code before the configured cloud providers: it is already
+    // installed and signed in here, so it is the one that actually answers.
+    // Still after Ollama, because a local model raises no privacy question
+    // and this one does.
+    if super::claude_provider::ClaudeProvider.available() {
+        out.push(Box::new(super::claude_provider::ClaudeProvider));
+    }
     out.extend(super::cloud_provider::configured(conn));
     out
 }
@@ -413,11 +415,18 @@ pub struct ValidatedStep {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum PlanRejection {
     #[serde(rename_all = "camelCase")]
-    UnknownAction { action_id: String },
+    UnknownAction {
+        action_id: String,
+    },
     #[serde(rename_all = "camelCase")]
-    InvalidInput { action_id: String, detail: String },
+    InvalidInput {
+        action_id: String,
+        detail: String,
+    },
     #[serde(rename_all = "camelCase")]
-    TooManySteps { limit: usize },
+    TooManySteps {
+        limit: usize,
+    },
     Empty,
 }
 
@@ -685,7 +694,10 @@ mod tests {
         .expect("valid");
         assert_eq!(steps.len(), 1);
         assert_eq!(steps[0].summary, "Open Settings");
-        assert!(!steps[0].requires_confirmation, "navigation does not confirm");
+        assert!(
+            !steps[0].requires_confirmation,
+            "navigation does not confirm"
+        );
     }
 
     #[test]
@@ -833,7 +845,9 @@ mod tests {
             .map(|(before, _)| before)
             .expect("marker");
         // The trait's only method takes a purpose and a context.
-        assert!(production.contains("fn reason(\n        &self,\n        purpose: Purpose,\n        context: &AiContext,"));
+        assert!(production.contains(
+            "fn reason(\n        &self,\n        purpose: Purpose,\n        context: &AiContext,"
+        ));
         assert!(!production.contains("fn reason(&self, conn:"));
     }
 
@@ -865,7 +879,9 @@ mod tests {
 
     #[test]
     fn unavailability_explains_itself_and_names_the_remedy() {
-        assert!(ReasoningUnavailable::NotAllowed.to_string().contains("Settings"));
+        assert!(ReasoningUnavailable::NotAllowed
+            .to_string()
+            .contains("Settings"));
         assert!(ReasoningUnavailable::NoProvider
             .to_string()
             .contains("directly"));
@@ -893,7 +909,10 @@ mod tests {
         .expect("store");
         let policy = read_policy(&conn);
         assert!(policy.external_reasoning_allowed);
-        assert!(!policy.content_sharing_allowed, "content stays off separately");
+        assert!(
+            !policy.content_sharing_allowed,
+            "content stays off separately"
+        );
     }
 
     struct FakeProvider {
@@ -1010,7 +1029,9 @@ mod tests {
             .expect("query")
             .map(|r| r.expect("row"))
             .collect();
-        for forbidden in ["prompt", "request", "response", "content", "context", "body"] {
+        for forbidden in [
+            "prompt", "request", "response", "content", "context", "body",
+        ] {
             assert!(
                 !columns.iter().any(|c| c == forbidden),
                 "ai_audit must not store {forbidden}"
@@ -1022,10 +1043,28 @@ mod tests {
     #[test]
     fn remote_and_local_use_are_distinguishable_in_the_trail() {
         let conn = test_conn();
-        record_use(&conn, "ollama", "llama3", Reach::LocalOnly, Purpose::Answer, &[], "ok", 1)
-            .expect("record");
-        record_use(&conn, "claude", "opus", Reach::LeavesMachine, Purpose::Draft, &[], "ok", 1)
-            .expect("record");
+        record_use(
+            &conn,
+            "ollama",
+            "llama3",
+            Reach::LocalOnly,
+            Purpose::Answer,
+            &[],
+            "ok",
+            1,
+        )
+        .expect("record");
+        record_use(
+            &conn,
+            "claude",
+            "opus",
+            Reach::LeavesMachine,
+            Purpose::Draft,
+            &[],
+            "ok",
+            1,
+        )
+        .expect("record");
         let rows = list_recent_use(&conn, 10).expect("list");
         assert_eq!(rows[0].reach, "remote");
         assert_eq!(rows[1].reach, "local");

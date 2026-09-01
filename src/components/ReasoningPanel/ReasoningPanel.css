@@ -1,0 +1,75 @@
+.reasoning-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.reasoning-panel__title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.reasoning-panel__hint {
+  font-size: 0.8125rem;
+  opacity: 0.75;
+  margin: 0;
+}
+
+.reasoning-panel__error {
+  font-size: 0.8125rem;
+  margin: 0;
+  color: var(--nexus-danger, #d94141);
+}
+
+.reasoning-panel__providers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.reasoning-panel__provider {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--nexus-border, rgba(127, 127, 127, 0.25));
+  border-radius: 6px;
+}
+
+.reasoning-panel__name {
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Which provider would actually answer, rather than leaving it to be inferred
+   from the list. */
+.reasoning-panel__badge {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.1rem 0.375rem;
+  border-radius: 999px;
+  background: var(--nexus-accent, #4c8dff);
+  color: #fff;
+}
+
+.reasoning-panel__meta {
+  font-size: 0.75rem;
+  opacity: 0.7;
+  text-align: right;
+}
+
+.reasoning-panel__toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+}

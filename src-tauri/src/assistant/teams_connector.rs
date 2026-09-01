@@ -71,18 +71,58 @@ const fn spec(
 }
 
 pub const ACTIONS: &[ActionSpec] = &[
-    spec("teams.status", "Check the Teams connection", Permission::Read, ConfirmPolicy::Never, Reach::LocalOnly),
+    spec(
+        "teams.status",
+        "Check the Teams connection",
+        Permission::Read,
+        ConfirmPolicy::Never,
+        Reach::LocalOnly,
+    ),
     // Handoff: works today, no authorisation.
-    spec("teams.open_chat", "Open a Teams chat", Permission::Interact, ConfirmPolicy::Never, Reach::LocalOnly),
-    spec("teams.compose_message", "Draft a Teams message for you to send", Permission::Write, ConfirmPolicy::Always, Reach::LocalOnly),
+    spec(
+        "teams.open_chat",
+        "Open a Teams chat",
+        Permission::Interact,
+        ConfirmPolicy::Never,
+        Reach::LocalOnly,
+    ),
+    spec(
+        "teams.compose_message",
+        "Draft a Teams message for you to send",
+        Permission::Write,
+        ConfirmPolicy::Always,
+        Reach::LocalOnly,
+    ),
     // Graph: blocked on tenant consent.
-    spec("teams.list_chats", "List recent Teams chats", Permission::Read, ConfirmPolicy::Never, Reach::LeavesMachine),
-    spec("teams.read_messages", "Read messages in a Teams chat", Permission::Read, ConfirmPolicy::Never, Reach::LeavesMachine),
-    spec("teams.send_message", "Send a Teams message", Permission::Write, ConfirmPolicy::Always, Reach::LeavesMachine),
+    spec(
+        "teams.list_chats",
+        "List recent Teams chats",
+        Permission::Read,
+        ConfirmPolicy::Never,
+        Reach::LeavesMachine,
+    ),
+    spec(
+        "teams.read_messages",
+        "Read messages in a Teams chat",
+        Permission::Read,
+        ConfirmPolicy::Never,
+        Reach::LeavesMachine,
+    ),
+    spec(
+        "teams.send_message",
+        "Send a Teams message",
+        Permission::Write,
+        ConfirmPolicy::Always,
+        Reach::LeavesMachine,
+    ),
 ];
 
 /// Actions that reach Microsoft Graph, and therefore need consent.
-const GRAPH_ACTIONS: &[&str] = &["teams.list_chats", "teams.read_messages", "teams.send_message"];
+const GRAPH_ACTIONS: &[&str] = &[
+    "teams.list_chats",
+    "teams.read_messages",
+    "teams.send_message",
+];
 
 // -- Configuration ------------------------------------------------------------
 
@@ -91,7 +131,7 @@ const GRAPH_ACTIONS: &[&str] = &["teams.list_chats", "teams.read_messages", "tea
 pub struct TeamsConfig {
     /// Azure app registration client id.
     pub client_id: String,
-    /// Directory (tenant) id, or a domain such as `avetta.com`.
+    /// Directory (tenant) id, or a domain such as `acme.com`.
     pub tenant_id: String,
     /// The signed-in account, used as the Keychain account name.
     pub account: String,
@@ -141,7 +181,7 @@ fn graph_blocker(conn: &Connection) -> Option<String> {
 
 // -- Validation ---------------------------------------------------------------
 
-/// A user principal name, e.g. `alec@avetta.com`.
+/// A user principal name, e.g. `alec@acme.com`.
 ///
 /// Validated because it is interpolated into a URL. Deliberately narrow: an
 /// address with a slash or a query character could rewrite the deep link into
@@ -156,7 +196,11 @@ pub fn valid_upn(raw: &str) -> Option<String> {
         return None;
     }
     let allowed = |c: char| c.is_ascii_alphanumeric() || "._%+-".contains(c);
-    if !local.chars().all(allowed) || !domain.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') {
+    if !local.chars().all(allowed)
+        || !domain
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+    {
         return None;
     }
     Some(upn.to_string())
@@ -380,14 +424,16 @@ impl Connector for TeamsConnector {
 
     fn summarize(&self, action_id: &str, input: &serde_json::Value, _conn: &Connection) -> String {
         match action_id {
-            "teams.compose_message" => match serde_json::from_value::<ComposeInput>(input.clone()) {
-                Ok(c) => format!(
-                    "Open a Teams chat with {} and put this in the box: \"{}\"",
-                    c.upn,
-                    c.message.chars().take(120).collect::<String>()
-                ),
-                Err(_) => "Draft a Teams message".to_string(),
-            },
+            "teams.compose_message" => {
+                match serde_json::from_value::<ComposeInput>(input.clone()) {
+                    Ok(c) => format!(
+                        "Open a Teams chat with {} and put this in the box: \"{}\"",
+                        c.upn,
+                        c.message.chars().take(120).collect::<String>()
+                    ),
+                    Err(_) => "Draft a Teams message".to_string(),
+                }
+            }
             "teams.send_message" => match serde_json::from_value::<SendInput>(input.clone()) {
                 Ok(s) => format!(
                     "Send to Teams: \"{}\"",
@@ -456,6 +502,34 @@ impl Connector for TeamsConnector {
         }
     }
 
+    fn describe_result(&self, action_id: &str, output: &serde_json::Value) -> Option<String> {
+        match action_id {
+            "teams.status" => {
+                let installed = output.get("installed")?.as_bool().unwrap_or(false);
+                let can_read = output.get("canRead")?.as_bool().unwrap_or(false);
+                Some(if !installed {
+                    "Teams is not installed on this Mac.".to_string()
+                } else if can_read {
+                    "Teams is connected.".to_string()
+                } else {
+                    "Teams is installed. NEXUS can open chats and draft messages, \
+                     but reading them needs Microsoft Graph access your tenant \
+                     administrator has to approve."
+                        .to_string()
+                })
+            }
+            "teams.compose_message" => Some(format!(
+                "Teams is open with your message ready. Press send when you are happy with it: \"{}\"",
+                output.get("message")?.as_str()?
+            )),
+            _ => None,
+        }
+    }
+
+    fn zero_input_actions(&self) -> &'static [&'static str] {
+        &["teams.status", "teams.list_chats"]
+    }
+
     fn dispatch(
         &self,
         action_id: &str,
@@ -517,11 +591,10 @@ impl Connector for TeamsConnector {
 
             "teams.read_messages" => {
                 let target: ChatRef = parse(input)?;
-                let chat = valid_chat_id(&target.chat_id).ok_or_else(|| {
-                    ActionError::InvalidInput {
+                let chat =
+                    valid_chat_id(&target.chat_id).ok_or_else(|| ActionError::InvalidInput {
                         detail: "That is not a Teams chat id.".to_string(),
-                    }
-                })?;
+                    })?;
                 let value = graph_get(
                     ctx.conn,
                     &format!("/me/chats/{}/messages?$top={MESSAGE_LIMIT}", encode(&chat)),
@@ -536,11 +609,10 @@ impl Connector for TeamsConnector {
 
             "teams.send_message" => {
                 let target: SendInput = parse(input)?;
-                let chat = valid_chat_id(&target.chat_id).ok_or_else(|| {
-                    ActionError::InvalidInput {
+                let chat =
+                    valid_chat_id(&target.chat_id).ok_or_else(|| ActionError::InvalidInput {
                         detail: "That is not a Teams chat id.".to_string(),
-                    }
-                })?;
+                    })?;
                 let message = check_message(&target.message)?;
                 let token = graph_token(ctx.conn).ok_or_else(|| ActionError::Failed {
                     detail: graph_blocker(ctx.conn)
@@ -616,14 +688,20 @@ mod tests {
 
     #[test]
     fn a_work_address_is_accepted_and_anything_url_shaped_is_not() {
-        assert_eq!(valid_upn("alec@avetta.com").as_deref(), Some("alec@avetta.com"));
-        assert_eq!(valid_upn(" a.b-c@sub.avetta.com ").as_deref(), Some("a.b-c@sub.avetta.com"));
+        assert_eq!(
+            valid_upn("alec@acme.com").as_deref(),
+            Some("alec@acme.com")
+        );
+        assert_eq!(
+            valid_upn(" a.b-c@sub.acme.com ").as_deref(),
+            Some("a.b-c@sub.acme.com")
+        );
         for hostile in [
-            "alec@avetta.com&message=hijacked",
-            "alec@avetta.com/../x",
-            "alec@avetta.com?x=1",
+            "alec@acme.com&message=hijacked",
+            "alec@acme.com/../x",
+            "alec@acme.com?x=1",
             "alec",
-            "@avetta.com",
+            "@acme.com",
             "alec@",
             "alec@nodot",
             "",
@@ -690,7 +768,9 @@ mod tests {
         let conn = test_conn();
         let caps = TeamsConnector.capabilities(&conn);
         if std::path::Path::new("/Applications/Microsoft Teams.app").exists() {
-            assert!(caps.available.contains(&"teams.compose_message".to_string()));
+            assert!(caps
+                .available
+                .contains(&"teams.compose_message".to_string()));
             assert!(caps.available.contains(&"teams.open_chat".to_string()));
         }
     }
@@ -755,7 +835,7 @@ mod tests {
         let conn = test_conn();
         let drafts = TeamsConnector.observe(
             "teams.compose_message",
-            &serde_json::json!({ "upn": "alec@avetta.com", "message": "hi" }),
+            &serde_json::json!({ "upn": "alec@acme.com", "message": "hi" }),
             &serde_json::json!({}),
             &conn,
         );

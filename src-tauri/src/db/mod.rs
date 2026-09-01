@@ -1,4 +1,6 @@
 pub mod agents;
+pub mod commitments;
+pub mod contacts;
 pub mod ides;
 pub mod migrations;
 pub mod projects;
@@ -22,8 +24,7 @@ pub fn init(app: &AppHandle) -> Result<Connection, String> {
     let db_path = resolve_db_path(app)?;
     log::info!("NEXUS database path: {}", db_path.display());
 
-    let conn = Connection::open(&db_path)
-        .map_err(|e| format!("Failed to open database: {e}"))?;
+    let conn = Connection::open(&db_path).map_err(|e| format!("Failed to open database: {e}"))?;
 
     // Enforce foreign-key constraints — SQLite disables them by default.
     conn.execute_batch("PRAGMA foreign_keys = ON;")
@@ -50,11 +51,9 @@ pub fn init(app: &AppHandle) -> Result<Connection, String> {
 
 /// Returns the current highest applied migration ID, or 0 if none.
 pub fn migration_level(conn: &Connection) -> Result<i64, String> {
-    conn.query_row(
-        "SELECT COALESCE(MAX(id), 0) FROM _migrations",
-        [],
-        |row| row.get::<_, i64>(0),
-    )
+    conn.query_row("SELECT COALESCE(MAX(id), 0) FROM _migrations", [], |row| {
+        row.get::<_, i64>(0)
+    })
     .map_err(|e| format!("Failed to read migration level: {e}"))
 }
 
@@ -140,7 +139,10 @@ mod tests {
         let mut sorted = ids.clone();
         sorted.sort();
         sorted.dedup();
-        assert_eq!(ids, sorted, "migrations must be unique and in ascending order");
+        assert_eq!(
+            ids, sorted,
+            "migrations must be unique and in ascending order"
+        );
         assert_eq!(ids[0], 1, "migration ids start at 1");
     }
 

@@ -197,7 +197,10 @@ impl ReasoningProvider for CloudProvider {
                 }),
                 vec![
                     ("Content-Type".to_string(), "application/json".to_string()),
-                    ("anthropic-version".to_string(), ANTHROPIC_VERSION.to_string()),
+                    (
+                        "anthropic-version".to_string(),
+                        ANTHROPIC_VERSION.to_string(),
+                    ),
                     ("x-api-key".to_string(), key),
                 ],
             ),
@@ -245,10 +248,11 @@ impl ReasoningProvider for CloudProvider {
             });
         }
 
-        let value: serde_json::Value =
-            serde_json::from_str(&response.body).map_err(|_| ReasoningUnavailable::Unreachable {
+        let value: serde_json::Value = serde_json::from_str(&response.body).map_err(|_| {
+            ReasoningUnavailable::Unreachable {
                 detail: "The provider returned something NEXUS could not read.".to_string(),
-            })?;
+            }
+        })?;
 
         // Two shapes, one meaning. Both end at `interpret`, which is where
         // the safe-direction rule lives: anything unrecognisable becomes an

@@ -49,7 +49,11 @@ pub fn insert_agent(
 
 /// Return registered agents, newest first. `enabled_only` filters out disabled rows.
 pub fn list_agents(conn: &Connection, enabled_only: bool) -> Result<Vec<RegistryEntry>, String> {
-    let filter = if enabled_only { "WHERE enabled = 1" } else { "" };
+    let filter = if enabled_only {
+        "WHERE enabled = 1"
+    } else {
+        ""
+    };
 
     let mut stmt = conn
         .prepare(&format!(
@@ -198,7 +202,10 @@ mod tests {
         )
         .expect_err("empty name must be rejected");
 
-        assert!(err.contains("Name cannot be empty"), "unexpected error: {err}");
+        assert!(
+            err.contains("Name cannot be empty"),
+            "unexpected error: {err}"
+        );
         assert!(list_agents(&conn, false).expect("list").is_empty());
     }
 
@@ -216,7 +223,10 @@ mod tests {
         )
         .expect_err("empty type must be rejected");
 
-        assert!(err.contains("Type cannot be empty"), "unexpected error: {err}");
+        assert!(
+            err.contains("Type cannot be empty"),
+            "unexpected error: {err}"
+        );
         assert!(list_agents(&conn, false).expect("list").is_empty());
     }
 
@@ -355,9 +365,7 @@ mod tests {
         )
         .expect("insert task");
 
-        let count = |sql: &str| -> i64 {
-            conn.query_row(sql, [], |r| r.get(0)).expect("count")
-        };
+        let count = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).expect("count") };
         let projects_before = count("SELECT COUNT(*) FROM projects");
         let tasks_before = count("SELECT COUNT(*) FROM tasks");
         assert_eq!(tasks_before, 2);
@@ -415,5 +423,4 @@ mod tests {
             .expect("count");
         assert_eq!(still_assigned, 1, "only the deleted agent may be cleared");
     }
-
 }

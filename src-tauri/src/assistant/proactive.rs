@@ -83,8 +83,18 @@ pub fn read_policy(conn: &Connection) -> ProactivePolicy {
 
 pub fn set_policy(conn: &Connection, policy: ProactivePolicy) -> Result<(), String> {
     for (key, value) in [
-        (KEY_ENABLED, if policy.enabled { "true".to_string() } else { "false".to_string() }),
-        (KEY_COOLDOWN, policy.cooldown_minutes.clamp(0, 10_080).to_string()),
+        (
+            KEY_ENABLED,
+            if policy.enabled {
+                "true".to_string()
+            } else {
+                "false".to_string()
+            },
+        ),
+        (
+            KEY_COOLDOWN,
+            policy.cooldown_minutes.clamp(0, 10_080).to_string(),
+        ),
     ] {
         conn.execute(
             "INSERT INTO settings (key, value) VALUES (?1, ?2)
@@ -422,7 +432,10 @@ mod tests {
             [],
         )
         .expect("seed");
-        assert_eq!(read_policy(&conn).cooldown_minutes, DEFAULT_COOLDOWN_MINUTES);
+        assert_eq!(
+            read_policy(&conn).cooldown_minutes,
+            DEFAULT_COOLDOWN_MINUTES
+        );
     }
 
     #[test]
@@ -489,7 +502,12 @@ mod tests {
             .split_once("#[cfg(test)]")
             .map(|(before, _)| before)
             .expect("marker");
-        for forbidden in ["NSUserNotification", "UNUserNotification", "osascript", "notify"] {
+        for forbidden in [
+            "NSUserNotification",
+            "UNUserNotification",
+            "osascript",
+            "notify",
+        ] {
             assert!(!production.contains(forbidden), "found {forbidden}");
         }
     }

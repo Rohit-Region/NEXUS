@@ -194,7 +194,10 @@ mod tests {
         let err = store
             .redeem(999, "nexus.delete_task", &json!({}))
             .expect_err("must reject");
-        assert!(err.contains("already used") || err.contains("restarted"), "{err}");
+        assert!(
+            err.contains("already used") || err.contains("restarted"),
+            "{err}"
+        );
     }
 
     #[test]

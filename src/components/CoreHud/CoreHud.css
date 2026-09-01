@@ -1,0 +1,338 @@
+.hud {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xl);
+  padding: var(--space-lg) 0 var(--space-xl);
+  flex-wrap: wrap;
+}
+
+.hud__core {
+  position: relative;
+  width: 260px;
+  height: 260px;
+  flex: 0 0 auto;
+}
+
+/* A faint bloom behind the rings. Gives the core the sense of being lit
+   rather than drawn, which is most of what separates a HUD from a chart. */
+.hud__core::before {
+  content: '';
+  position: absolute;
+  inset: 18%;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(230, 57, 70, 0.14) 0%,
+    rgba(230, 57, 70, 0.04) 45%,
+    transparent 70%
+  );
+  pointer-events: none;
+}
+
+.hud__rings {
+  position: relative;
+  display: block;
+}
+
+.hud__tick {
+  stroke: var(--color-border);
+  stroke-width: 1;
+}
+
+.hud__tick--major {
+  stroke: var(--color-text-muted);
+}
+
+.hud__track {
+  stroke: var(--color-border);
+  stroke-width: 4;
+}
+
+.hud__arc {
+  stroke-width: 4;
+  stroke-linecap: round;
+  /* Slower than the tick: an arc that snaps reads as a glitch, one that
+     eases reads as a mechanism. */
+  transition: stroke-dashoffset 0.9s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.hud__arc--done {
+  stroke: var(--color-status-online);
+}
+
+.hud__arc--moving {
+  stroke: var(--color-accent);
+}
+
+.hud__arc--next {
+  stroke: var(--color-text-secondary);
+}
+
+/* The last minute before a reminder speaks, and only then. */
+.hud__arc--urgent {
+  stroke: var(--color-accent);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hud__arc--urgent {
+    animation: hud-urgent 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes hud-urgent {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.hud__node {
+  transition: fill 0.4s ease;
+}
+
+.hud__node--ok {
+  fill: var(--color-status-online);
+}
+
+.hud__node--warn {
+  fill: var(--color-accent);
+}
+
+.hud__node--off {
+  fill: var(--color-text-muted);
+}
+
+.hud__centre {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  pointer-events: none;
+}
+
+.hud__clock {
+  font-family: var(--font-mono);
+  font-size: 40px;
+  font-weight: 300;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The colon carries the seconds, so the digits can stay still. A clock whose
+   numbers move every second is hard to read past. */
+.hud__colon {
+  color: var(--color-accent);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hud__colon {
+    animation: hud-blink 2s steps(1, end) infinite;
+  }
+}
+
+@keyframes hud-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0.25;
+  }
+}
+
+.hud__date {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.hud__next {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  margin-top: var(--space-sm);
+  max-width: 150px;
+}
+
+.hud__next-time {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  color: var(--color-accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.hud__next-what {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.hud__next--idle {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+/* ── Legend ───────────────────────────────────────────────────────────── */
+
+.hud__legend {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  gap: var(--space-md) var(--space-lg);
+  margin: 0;
+}
+
+.hud__legend-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hud__legend-item dt {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.hud__legend-item dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-weight: 300;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.hud__of {
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+/* A number that should draw the eye, and only when it should. */
+.hud__alarm {
+  color: var(--color-accent) !important;
+}
+
+.hud__key {
+  width: 8px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--color-text-muted);
+}
+
+.hud__key--done {
+  background: var(--color-status-online);
+}
+
+.hud__key--moving {
+  background: var(--color-accent);
+}
+
+.hud__key--blocked {
+  background: var(--color-accent-dim);
+}
+
+.hud__key--link {
+  background: var(--color-text-secondary);
+}
+
+@media (max-width: 720px) {
+  .hud {
+    gap: var(--space-lg);
+  }
+  .hud__legend {
+    grid-template-columns: repeat(2, minmax(90px, 1fr));
+  }
+}
+
+/* ── Boot sequence ────────────────────────────────────────────────────── */
+/*
+ * The rings draw in once, when the application starts. Not a loading state:
+ * the data arrives separately and the arcs animate to it. This is the
+ * machine coming up, and it plays exactly once because the second time it
+ * would just be in the way.
+ */
+.hud__rings {
+  opacity: 0;
+  transform: scale(0.94);
+  transition: opacity 0.5s ease, transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.hud__centre {
+  opacity: 0;
+  transition: opacity 0.5s ease 0.25s;
+}
+
+.hud--booted .hud__rings {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.hud--booted .hud__centre {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hud__rings,
+  .hud__centre {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+/* ── Interaction ──────────────────────────────────────────────────────── */
+
+/* Nodes are targets when there is somewhere to go. Growing on hover is the
+   whole affordance: a 3.5px circle needs to say it can be pressed. */
+.hud__node--live {
+  cursor: pointer;
+  transition: fill 0.4s ease, r 0.15s ease;
+}
+
+.hud__node--live:hover,
+.hud__node--live:focus-visible {
+  r: 6;
+  outline: none;
+}
+
+.hud__legend-item--go {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: var(--space-xs) var(--space-sm);
+  margin: calc(var(--space-xs) * -1) calc(var(--space-sm) * -1);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.hud__legend-item--go:hover {
+  background-color: var(--color-bg-secondary);
+  border-color: var(--color-border);
+}

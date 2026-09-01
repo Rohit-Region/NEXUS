@@ -117,3 +117,27 @@
   color: var(--color-text-secondary);
   flex-shrink: 0;
 }
+
+/* ── Railed layout ────────────────────────────────────────────────────── */
+/*
+ * The shell gained a permanent left rail, so it is now a row with the old
+ * column inside it. Scoped to a modifier rather than changing `.app-shell`
+ * outright, so nothing that still renders the plain shell is disturbed.
+ */
+.app-shell--railed {
+  flex-direction: row;
+  align-items: stretch;
+}
+
+.app-shell--railed .app-shell__column {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* The rail already carries the wordmark. */
+.app-shell--railed .app-shell__header .logo {
+  display: none;
+}

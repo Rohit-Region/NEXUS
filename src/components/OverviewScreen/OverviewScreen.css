@@ -1,6 +1,15 @@
+/*
+ * Wide, because the command centre is three columns.
+ *
+ * This was 720px, sized for the single stack of cards it used to hold. With
+ * the core and its flanks inside, that column left most of the window empty
+ * and squeezed the panels into strips. A ceiling is still worth having: past
+ * about 1600px the eye has to travel across the whole screen to relate the
+ * weather to the reminders, which is the opposite of a glance.
+ */
 .overview {
   width: 100%;
-  max-width: 720px;
+  max-width: 1600px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
@@ -174,4 +183,46 @@
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--color-text-muted);
+}
+
+/* ── Command centre ───────────────────────────────────────────────────── */
+/*
+ * Three columns with the core in the middle. The flanks are the two things
+ * wanted before deciding what to do: what it is like outside, and what NEXUS
+ * thinks needs attention.
+ *
+ * It collapses to one column early. The core is the piece that must stay
+ * whole; the panels beside it read perfectly well stacked.
+ */
+.cc {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto minmax(300px, 1.2fr);
+  align-items: start;
+  gap: var(--space-lg);
+  margin-bottom: var(--space-lg);
+}
+
+.cc__left,
+.cc__right {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  min-width: 0;
+}
+
+/* The activity list gets a ceiling so the page does not grow without bound
+   as the audit trail fills. */
+.cc__right .live {
+  max-height: 340px;
+}
+
+@media (max-width: 1240px) {
+  .cc {
+    grid-template-columns: 1fr;
+    justify-items: center;
+  }
+  .cc__left,
+  .cc__right {
+    width: 100%;
+  }
 }

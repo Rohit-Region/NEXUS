@@ -168,3 +168,31 @@
     grid-template-columns: 1fr;
   }
 }
+
+/*
+ * Connector configuration: endpoints and account names, sat with the
+ * connector they belong to rather than in application preferences.
+ */
+.permissions-panel__config {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--nexus-border, rgba(127, 127, 127, 0.25));
+}
+
+.permissions-panel__config-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.permissions-panel__config-label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.permissions-panel__config button {
+  align-self: flex-start;
+}

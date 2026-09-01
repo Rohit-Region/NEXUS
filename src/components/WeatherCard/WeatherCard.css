@@ -1,0 +1,93 @@
+.weather {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md) var(--space-lg);
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.weather__icon {
+  color: var(--color-text-secondary);
+  flex: 0 0 auto;
+}
+
+.weather__body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.weather__place {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.weather__temp {
+  font-family: var(--font-mono);
+  font-size: 34px;
+  font-weight: 200;
+  line-height: 1.1;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.weather__temp--none {
+  color: var(--color-text-muted);
+}
+
+.weather__unit {
+  font-size: 17px;
+  color: var(--color-text-muted);
+  margin-left: 2px;
+}
+
+/* The connector's whole sentence. Wrapped rather than truncated: it is the
+   part that is actually true, and the number above is derived from it. */
+.weather__report {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+  max-width: 34ch;
+}
+
+.weather__refresh {
+  position: absolute;
+  top: var(--space-sm);
+  right: var(--space-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.weather__refresh:hover:not(:disabled) {
+  color: var(--color-accent);
+  border-color: var(--color-accent-dim);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .weather__refresh--busy {
+    animation: weather-spin 0.9s linear infinite;
+  }
+}
+
+@keyframes weather-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -89,7 +89,11 @@ pub fn safe_https(url: &str) -> Result<String, HttpError> {
             detail: format!("NEXUS only sends credentials over https, and {trimmed} is not."),
         });
     }
-    let scheme_len = if lowered.starts_with("https://") { 8 } else { 7 };
+    let scheme_len = if lowered.starts_with("https://") {
+        8
+    } else {
+        7
+    };
     if trimmed.len() <= scheme_len {
         return Err(HttpError::Rejected {
             detail: "That address has no host.".to_string(),
@@ -160,8 +164,7 @@ pub fn send(request: Request) -> Result<Response, HttpError> {
             .any(|(name, _)| name.eq_ignore_ascii_case("authorization"));
     if authenticated && !url.to_lowercase().starts_with("https://") {
         return Err(HttpError::Rejected {
-            detail: "NEXUS will not send credentials over an unencrypted connection."
-                .to_string(),
+            detail: "NEXUS will not send credentials over an unencrypted connection.".to_string(),
         });
     }
 
@@ -185,13 +188,18 @@ pub fn send(request: Request) -> Result<Response, HttpError> {
     if let Some(body) = &request.body {
         config.push_str(&format!("data = \"{}\"\n", config_value(body)?));
     }
-    config.push_str("silent\nshow-error\nfail-with-body\nlocation = false\n");
+    // Boolean options in a curl config file are bare words. Writing
+    // `location = false` is a parse error, not a disabled redirect, and it
+    // made every request fail before a packet left the machine. Not following
+    // redirects is curl's default, so its absence is the desired behaviour:
+    // an authenticated request must never be replayed to somewhere else.
+    config.push_str("silent\nshow-error\nfail-with-body\n");
     config.push_str(&format!("max-time = {CURL_MAX_TIME}\n"));
     config.push_str(&format!("write-out = \"{STATUS_MARKER}%{{http_code}}\"\n"));
 
     // argv carries no data at all: the entire request is on stdin.
-    let out = run_with_stdin(CURL, &["--config", "-"], &config, HTTP_TIMEOUT).map_err(|e| {
-        match e {
+    let out =
+        run_with_stdin(CURL, &["--config", "-"], &config, HTTP_TIMEOUT).map_err(|e| match e {
             RunError::NotFound { .. } => HttpError::Unreachable {
                 detail: "curl is missing from this Mac, so NEXUS cannot make web requests."
                     .to_string(),
@@ -199,8 +207,7 @@ pub fn send(request: Request) -> Result<Response, HttpError> {
             other => HttpError::Unreachable {
                 detail: other.to_string(),
             },
-        }
-    })?;
+        })?;
 
     let raw = out.stdout;
     let (body, status_text) = match raw.rsplit_once(STATUS_MARKER) {
@@ -215,9 +222,35 @@ pub fn send(request: Request) -> Result<Response, HttpError> {
         }
     };
 
-    let status: u16 = status_text.trim().parse().map_err(|_| HttpError::Malformed {
-        detail: "The response had no usable status code.".to_string(),
-    })?;
+    let status: u16 = status_text
+        .trim()
+        .parse()
+        .map_err(|_| HttpError::Malformed {
+            detail: "The response had no usable status code.".to_string(),
+        })?;
+
+    // curl still writes the status marker when the request never happened,
+    // with a code of zero: a DNS failure, a refused connection, a timeout. On
+    // its own that came back as `Ok` with status 0, so a request that never
+    // left the machine looked like a response. The reason is on stderr, where
+    // curl puts it as "curl: (6) Could not resolve host: ...".
+    if status == 0 {
+        // Strip curl's "curl: (6) " prefix so the user reads the reason
+        // rather than an exit code they would have to look up.
+        let detail = out
+            .stderr
+            .split_once(") ")
+            .map(|(_, rest)| rest.trim().to_string())
+            .filter(|rest| !rest.is_empty())
+            .unwrap_or_else(|| out.stderr.trim().to_string());
+        return Err(HttpError::Unreachable {
+            detail: if detail.is_empty() {
+                "The request did not reach the server.".to_string()
+            } else {
+                detail
+            },
+        });
+    }
 
     let mut body = body.to_string();
     if body.len() > MAX_BODY {
@@ -233,6 +266,77 @@ pub fn send(request: Request) -> Result<Response, HttpError> {
 /// application support directory, and a token in it is a token on disk in the
 /// clear. `security` prints the secret on **stdout**, so it never appears in
 /// any process's arguments.
+/// Store a secret in the login Keychain.
+///
+/// The value is written to the process's **stdin**, never to `argv`. Passing
+/// `-w <value>` would put a refresh token in the process table where any
+/// process on the machine could read it with `ps`. `security` prompts twice
+/// for confirmation, so the value is sent twice.
+pub fn store_keychain_secret(service: &str, account: &str, secret: &str) -> Result<(), String> {
+    let out = super::shell::run_with_stdin(
+        "/usr/bin/security",
+        // -U updates in place if the item already exists, so a refreshed
+        // token replaces the old one rather than erroring.
+        &[
+            "add-generic-password",
+            "-U",
+            "-s",
+            service,
+            "-a",
+            account,
+            "-w",
+        ],
+        &format!("{secret}\n{secret}\n"),
+        Duration::from_secs(15),
+    )
+    .map_err(|e| format!("Could not reach the Keychain: {e}"))?;
+
+    if !out.success {
+        return Err("The Keychain refused to store the credential.".to_string());
+    }
+
+    // Read it back, because `security` truncates a secret given on stdin at
+    // 128 characters and reports success anyway.
+    //
+    // This cost real time: a 192-character Atlassian token was stored as its
+    // first 128, and every request then failed with "Jira rejected the
+    // credentials" while the token itself was perfectly valid. A silently
+    // corrupted secret is worse than a refused one, because the error names
+    // the wrong thing.
+    //
+    // The secret is deliberately not passed as an argument instead, which
+    // would avoid the limit: every process on this machine can read another
+    // process's command line, and that invariant is worth more than the
+    // convenience. So this reports rather than works around.
+    match keychain_secret(service, account) {
+        Some(stored) if stored == secret => Ok(()),
+        Some(stored) => {
+            // Leave nothing half-written: a truncated secret that looks
+            // present is what produced the misleading failure.
+            let _ = forget_keychain_secret(service, account);
+            Err(format!(
+                "The Keychain stored only {} of {} characters. `security` truncates a \
+                 secret typed at its prompt. Store it directly instead:\n\n  \
+                 security add-generic-password -s {service} -a {account} -U -w '<the secret>'",
+                stored.chars().count(),
+                secret.chars().count()
+            ))
+        }
+        None => Err("The Keychain accepted the credential but cannot read it back.".to_string()),
+    }
+}
+
+/// Remove a secret. Used when signing out, so nothing is left behind.
+pub fn forget_keychain_secret(service: &str, account: &str) -> Result<(), String> {
+    let _ = super::shell::run(
+        "/usr/bin/security",
+        &["delete-generic-password", "-s", service, "-a", account],
+        Duration::from_secs(10),
+    );
+    // A missing item is the desired end state, so absence is not a failure.
+    Ok(())
+}
+
 pub fn keychain_secret(service: &str, account: &str) -> Option<String> {
     let out = super::shell::run(
         "/usr/bin/security",
@@ -248,7 +352,104 @@ pub fn keychain_secret(service: &str, account: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_truncated_secret_is_reported_not_kept() {
+        // `security` caps a secret given on its prompt at 128 characters and
+        // still reports success. A 192-character Atlassian token was stored
+        // as its first 128, and every request afterwards failed with "Jira
+        // rejected the credentials" while the token itself was valid.
+        //
+        // Uses a service name of its own so it cannot disturb a real entry.
+        const SERVICE: &str = "nexus-test-truncation";
+        const ACCOUNT: &str = "probe@example.com";
+        let long: String = std::iter::repeat('a').take(192).collect();
+
+        let result = store_keychain_secret(SERVICE, ACCOUNT, &long);
+        let _ = forget_keychain_secret(SERVICE, ACCOUNT);
+
+        match result {
+            // The limit is real on this machine: it must be reported, and
+            // the message must say what to do instead.
+            Err(message) => {
+                assert!(message.contains("128"), "{message}");
+                assert!(message.contains("add-generic-password"), "{message}");
+            }
+            // If a future macOS lifts the limit, storing correctly is also a
+            // pass. What must never happen is silent truncation, and the
+            // read-back is what rules that out either way.
+            Ok(()) => {}
+        }
+    }
+
+    #[test]
+    fn the_secret_never_reaches_the_command_line() {
+        // The reason the truncation is reported rather than worked around:
+        // passing it as an argument would avoid the limit and put the
+        // credential where every process on the machine can read it.
+        let production = include_str!("http.rs")
+            .split_once("#[cfg(test)]")
+            .map(|(before, _)| before)
+            .expect("marker");
+        let writer = production
+            .split_once("pub fn store_keychain_secret")
+            .map(|(_, rest)| rest)
+            .expect("the writer");
+        let body = &writer[..writer.find("\n}").expect("end")];
+        assert!(body.contains("run_with_stdin"));
+        assert!(
+            !body.contains("\"-w\", secret") && !body.contains("-w\", &secret"),
+            "the secret must not be an argument"
+        );
+    }
     use super::*;
+
+    /// Every option NEXUS writes into a curl config, checked by curl itself.
+    ///
+    /// The unit tests here all inspected the string NEXUS builds, which is
+    /// why `location = false` survived: it looked perfectly reasonable and
+    /// was a parse error. Only curl can say whether curl will accept it.
+    #[test]
+    fn curl_accepts_every_option_the_config_uses() {
+        use std::io::Write;
+
+        let mut path = std::env::temp_dir();
+        path.push(format!("nexus-curl-config-{}.cfg", std::process::id()));
+
+        // The same shape send() builds, pointed at a URL that resolves
+        // nowhere so the test never depends on the network.
+        let config = "url = \"https://127.0.0.1:1/probe\"\n\
+                      request = \"POST\"\n\
+                      header = \"Content-Type: application/json\"\n\
+                      data = \"{}\"\n\
+                      silent\nshow-error\nfail-with-body\n\
+                      max-time = 1\n\
+                      write-out = \"<<<NEXUS_STATUS>>>%{http_code}\"\n";
+        std::fs::File::create(&path)
+            .and_then(|mut f| f.write_all(config.as_bytes()))
+            .expect("write config");
+
+        let out = super::super::shell::run(
+            "/usr/bin/curl",
+            &["--config", path.to_str().expect("path")],
+            Duration::from_secs(10),
+        )
+        .expect("curl runs");
+        let _ = std::fs::remove_file(&path);
+
+        // A connection failure is fine and expected. A *config* failure is
+        // the bug this test exists to catch.
+        assert!(
+            !out.stderr.contains("error encountered when reading a file"),
+            "curl rejected the config NEXUS builds: {}",
+            out.stderr
+        );
+        assert!(
+            !out.stderr.contains("option --config"),
+            "curl rejected an option NEXUS writes: {}",
+            out.stderr
+        );
+    }
 
     // -- URL policy -----------------------------------------------------------
 
@@ -288,9 +489,8 @@ mod tests {
     #[test]
     fn credentials_are_refused_over_plain_http_even_on_loopback() {
         // The loopback exemption is for unauthenticated local services only.
-        let result = send(
-            Request::get("http://127.0.0.1:11434/api/tags").with_basic_auth("a", "secret"),
-        );
+        let result =
+            send(Request::get("http://127.0.0.1:11434/api/tags").with_basic_auth("a", "secret"));
         assert!(
             matches!(result, Err(HttpError::Rejected { .. })),
             "credentials must never travel unencrypted: {result:?}"
@@ -306,7 +506,10 @@ mod tests {
             basic_auth: None,
             body: None,
         });
-        assert!(matches!(result, Err(HttpError::Rejected { .. })), "{result:?}");
+        assert!(
+            matches!(result, Err(HttpError::Rejected { .. })),
+            "{result:?}"
+        );
     }
 
     #[test]

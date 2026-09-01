@@ -37,16 +37,72 @@ use serde::{Deserialize, Serialize};
 /// translation layer or Tamil dependency is involved.
 const FILLER_WORDS: &[&str] = &[
     // English conversational filler
-    "a", "an", "the", "to", "go", "please", "can", "could", "would", "you",
-    "just", "now", "for", "me", "my", "hey", "ok", "okay", "um", "uh", "and",
-    "then", "in", "on", "of", "it", "is", "let", "us", "lets",
+    "a",
+    "an",
+    "the",
+    "to",
+    "go",
+    "please",
+    "can",
+    "could",
+    "would",
+    "you",
+    "just",
+    "now",
+    "for",
+    "me",
+    "my",
+    "hey",
+    "ok",
+    "okay",
+    "um",
+    "uh",
+    "and",
+    "then",
+    "in",
+    "on",
+    "of",
+    "it",
+    "is",
+    // Demonstratives. Pure deixis: "read this page" and "read the page" are
+    // the same request, and treating "this" as a noun made the first one
+    // match nothing at all.
+    "this",
+    "that",
+    "these",
+    "those",
+    "here",
+    "there",
+    "let",
+    "us",
+    "lets",
     // UI nouns people append without meaning anything by them:
     // "open settings tab", "go to projects screen". Deliberately excludes
     // "list", which is a real keyword of Go to Projects.
-    "tab", "screen", "page", "window", "section", "panel", "menu", "view",
+    "tab",
+    "screen",
+    "page",
+    "window",
+    "section",
+    "panel",
+    "menu",
+    "view",
     // Tanglish imperative/politeness endings, treated as noise only
-    "pannunga", "pannu", "pannuga", "panniduga", "pannunga.", "seyyunga",
-    "seyyu", "kaattu", "kaamunga", "venum", "irukku", "la", "da", "ne", "nga",
+    "pannunga",
+    "pannu",
+    "pannuga",
+    "panniduga",
+    "pannunga.",
+    "seyyunga",
+    "seyyu",
+    "kaattu",
+    "kaamunga",
+    "venum",
+    "irukku",
+    "la",
+    "da",
+    "ne",
+    "nga",
 ];
 
 /// Words meaning "make a new one".
@@ -94,6 +150,8 @@ const KEYWORD_WEIGHT: i64 = 1;
 /// Never offer more than this many candidates.
 const MAX_CANDIDATES: usize = 8;
 
+
+
 /// Lowercase, strip punctuation, split on whitespace, drop empties.
 /// Punctuation becomes a separator so "settings," and "settings" agree.
 fn tokenize(text: &str) -> Vec<String> {
@@ -133,6 +191,69 @@ fn tokens_match(a: &str, b: &str) -> bool {
 
 fn contains_any(tokens: &[String], words: &[&str]) -> bool {
     tokens.iter().any(|t| words.contains(&t.as_str()))
+}
+
+/// Verbs that say how to act rather than what to act on.
+///
+/// Shared across most of the registry, so a match on one is no evidence of
+/// which command was meant.
+fn is_verb(word: &str) -> bool {
+    COMMAND_VERBS.contains(&word)
+}
+
+const COMMAND_VERBS: [&str; 22] = [
+    "list", "open", "show", "check", "go", "switch", "get", "find", "read", "close", "start",
+    "new", "create", "delete", "clear", "send", "tell", "give", "make", "focus", "run", "set",
+];
+
+/// Does this command account for enough of the exchange to be offered?
+///
+/// Score alone is not evidence of understanding. A single shared word scores
+/// LABEL_WEIGHT * EXACT_MATCH = 4, comfortably over the threshold, which is
+/// how "clear my recent activity" resolved to "List **recent** Teams chats"
+/// and offered to open Teams on the strength of the word "recent".
+///
+/// The test is that the match explains at least half of one side: half of
+/// what the user said, or half of what the command is called. Requiring it
+/// of the user's side alone would reject "open settings" for "Settings";
+/// requiring it of the label alone would reject "tabs" for "List open tabs".
+/// One word in common with a four-word label satisfies neither, which is the
+/// case being excluded.
+fn explains(spoken: &[String], label: &[String], keywords: &[String]) -> bool {
+    if spoken.is_empty() || label.is_empty() {
+        return false;
+    }
+    // Verbs are structural, not distinguishing: "list" is shared by half the
+    // registry and "check" by most of the rest. Weighing them is what let
+    // "list my tabs" tie with "List recent Teams chats", and what made
+    // "check my calendar" resolve to "Check the weather". Only nouns say
+    // which command was meant, so both sides are compared on nouns alone.
+    let label_nouns: Vec<&String> = label.iter().filter(|w| !is_verb(w)).collect();
+    let spoken_nouns: Vec<&String> = spoken.iter().filter(|w| !is_verb(w)).collect();
+    if label_nouns.is_empty() {
+        return false;
+    }
+    // A request that is all verb and filler has nothing else to go on:
+    // "read this page" is just "read" once the deixis is stripped. Falling
+    // back to the verb keeps those working, and they are usually ambiguous
+    // enough that NEXUS asks rather than acts.
+    if spoken_nouns.is_empty() {
+        return spoken
+            .iter()
+            .any(|word| label.iter().chain(keywords).any(|k| tokens_match(word, k)));
+    }
+
+    // Every noun the user said must be accounted for. A command that does
+    // not know one of the user's own nouns is not the command they meant:
+    // "recent" out of "recent activity" is how Teams was offered for a
+    // request that had nothing to do with Teams, and "team" out of "my
+    // regards to the team" is the same mistake with a different word.
+    //
+    // Scoring still decides which of the qualifying commands wins; this only
+    // decides which are allowed to compete.
+    spoken_nouns
+        .iter()
+        .all(|word| label.iter().chain(keywords).any(|k| tokens_match(word, k)))
 }
 
 /// Weighted overlap: exact hits count double a singular/plural hit, so the
@@ -213,8 +334,7 @@ pub fn resolve_voice_intent(
     // scoring, where the per-project command wins. Anything else naming a
     // project means "open that project", which the existing search already
     // does, so no voice-only command vocabulary is invented here.
-    let wants_new_task =
-        contains_any(&tokens, CREATE_SIGNALS) && contains_any(&tokens, TASK_WORDS);
+    let wants_new_task = contains_any(&tokens, CREATE_SIGNALS) && contains_any(&tokens, TASK_WORDS);
 
     if let Some(name) = &project {
         if !wants_new_task {
@@ -230,20 +350,21 @@ pub fn resolve_voice_intent(
 
     // Score every command. Label hits count double: a label is what the
     // command is called, a keyword is merely a hint.
+    let spoken = significant(&normalized);
+
     let mut scored: Vec<(i64, &VoiceCommandSpec)> = commands
         .iter()
         .map(|c| {
             let label_tokens = significant(&c.label);
-            let keyword_tokens: Vec<String> = c
-                .keywords
-                .iter()
-                .flat_map(|k| significant(k))
-                .collect();
+            let keyword_tokens: Vec<String> =
+                c.keywords.iter().flat_map(|k| significant(k)).collect();
             let score = LABEL_WEIGHT * overlap(&tokens, &label_tokens)
                 + KEYWORD_WEIGHT * overlap(&tokens, &keyword_tokens);
-            (score, c)
+            let enough = explains(&spoken, &label_tokens, &keyword_tokens);
+            (score, c, enough)
         })
-        .filter(|(score, _)| *score >= SCORE_THRESHOLD)
+        .filter(|(score, _, enough)| *score >= SCORE_THRESHOLD && *enough)
+        .map(|(score, c, _)| (score, c))
         .collect();
 
     // Total order: score descending, then id ascending. No ties remain, so
@@ -290,31 +411,41 @@ mod tests {
                 id: "nav-overview".into(),
                 label: "Go to Overview".into(),
                 keywords: ["overview", "home", "dashboard", "summary", "stats"]
-                    .iter().map(|s| s.to_string()).collect(),
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
             },
             VoiceCommandSpec {
                 id: "nav-projects".into(),
                 label: "Go to Projects".into(),
                 keywords: ["projects", "list", "workspace"]
-                    .iter().map(|s| s.to_string()).collect(),
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
             },
             VoiceCommandSpec {
                 id: "nav-registry".into(),
                 label: "Go to Registry".into(),
                 keywords: ["registry", "ide", "ides", "agent", "agents", "tools"]
-                    .iter().map(|s| s.to_string()).collect(),
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
             },
             VoiceCommandSpec {
                 id: "nav-settings".into(),
                 label: "Go to Settings".into(),
                 keywords: ["settings", "preferences", "options", "config"]
-                    .iter().map(|s| s.to_string()).collect(),
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
             },
             VoiceCommandSpec {
                 id: "create-project".into(),
                 label: "New Project".into(),
                 keywords: ["new", "create", "add", "project"]
-                    .iter().map(|s| s.to_string()).collect(),
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
             },
         ];
         for (id, name) in [(3, "ALPHA"), (4, "UI-TEST-WORK"), (6, "UI-TEST-ZULU")] {
@@ -322,7 +453,9 @@ mod tests {
                 id: format!("create-task-{id}"),
                 label: format!("New Task in {name}"),
                 keywords: ["new", "create", "add", "task", name]
-                    .iter().map(|s| s.to_string()).collect(),
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
             });
         }
         v
@@ -330,7 +463,9 @@ mod tests {
 
     fn projects() -> Vec<String> {
         ["ALPHA", "UI-TEST-WORK", "UI-TEST-EMPTY", "UI-TEST-ZULU"]
-            .iter().map(|s| s.to_string()).collect()
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
     }
 
     fn resolve(t: &str) -> VoiceIntent {
@@ -367,8 +502,14 @@ mod tests {
         // user can pick. Confirmation is required either way.
         let singular = resolve("go to project");
         let plural = resolve("go to projects");
-        assert_eq!(singular.command_ids.first().map(String::as_str), Some("create-project"));
-        assert_eq!(plural.command_ids.first().map(String::as_str), Some("nav-projects"));
+        assert_eq!(
+            singular.command_ids.first().map(String::as_str),
+            Some("create-project")
+        );
+        assert_eq!(
+            plural.command_ids.first().map(String::as_str),
+            Some("nav-projects")
+        );
         assert!(
             singular.command_ids.contains(&"nav-projects".to_string()),
             "the plural command must still be offered, got {:?}",
@@ -429,14 +570,33 @@ mod tests {
         let r = resolve("new task create pannunga");
         // Every New Task command must outrank New Project. Lower-ranked
         // alternatives are still offered, which is safe: the user confirms.
-        let first_task = r.command_ids.iter().position(|id| id.starts_with("create-task-"));
+        let first_task = r
+            .command_ids
+            .iter()
+            .position(|id| id.starts_with("create-task-"));
         let first_project = r.command_ids.iter().position(|id| id == "create-project");
-        assert_eq!(first_task, Some(0), "a New Task command must rank first, got {:?}", r.command_ids);
+        assert_eq!(
+            first_task,
+            Some(0),
+            "a New Task command must rank first, got {:?}",
+            r.command_ids
+        );
         if let Some(p) = first_project {
-            let last_task = r.command_ids.iter().rposition(|id| id.starts_with("create-task-")).unwrap();
-            assert!(p > last_task, "New Project must rank below every New Task, got {:?}", r.command_ids);
+            let last_task = r
+                .command_ids
+                .iter()
+                .rposition(|id| id.starts_with("create-task-"))
+                .unwrap();
+            assert!(
+                p > last_task,
+                "New Project must rank below every New Task, got {:?}",
+                r.command_ids
+            );
         }
-        assert!(r.ambiguous, "several projects tie at the top, so the user must choose");
+        assert!(
+            r.ambiguous,
+            "several projects tie at the top, so the user must choose"
+        );
     }
 
     #[test]
@@ -454,19 +614,28 @@ mod tests {
     #[test]
     fn open_settings_resolves() {
         let r = resolve("open settings");
-        assert_eq!(r.command_ids.first().map(String::as_str), Some("nav-settings"));
+        assert_eq!(
+            r.command_ids.first().map(String::as_str),
+            Some("nav-settings")
+        );
     }
 
     #[test]
     fn open_projects_resolves() {
         let r = resolve("open projects");
-        assert_eq!(r.command_ids.first().map(String::as_str), Some("nav-projects"));
+        assert_eq!(
+            r.command_ids.first().map(String::as_str),
+            Some("nav-projects")
+        );
     }
 
     #[test]
     fn create_project_resolves() {
         let r = resolve("create project");
-        assert_eq!(r.command_ids.first().map(String::as_str), Some("create-project"));
+        assert_eq!(
+            r.command_ids.first().map(String::as_str),
+            Some("create-project")
+        );
     }
 
     // -- Project-specific command --------------------------------------------
@@ -495,7 +664,11 @@ mod tests {
     #[test]
     fn ambiguous_transcript_offers_every_tied_candidate() {
         let r = resolve("new task");
-        assert!(r.ambiguous, "one command per project ties, got {:?}", r.command_ids);
+        assert!(
+            r.ambiguous,
+            "one command per project ties, got {:?}",
+            r.command_ids
+        );
         assert!(
             r.command_ids.len() > 1,
             "an ambiguous transcript must offer choices, got {:?}",
@@ -503,9 +676,17 @@ mod tests {
         );
         // All three per-project New Task commands must be offered, ranked
         // above any weaker alternative.
-        let tasks: Vec<&String> = r.command_ids.iter()
-            .filter(|id| id.starts_with("create-task-")).collect();
-        assert_eq!(tasks.len(), 3, "every project should be offered, got {:?}", r.command_ids);
+        let tasks: Vec<&String> = r
+            .command_ids
+            .iter()
+            .filter(|id| id.starts_with("create-task-"))
+            .collect();
+        assert_eq!(
+            tasks.len(),
+            3,
+            "every project should be offered, got {:?}",
+            r.command_ids
+        );
         assert!(r.command_ids[0].starts_with("create-task-"));
     }
 
@@ -530,8 +711,14 @@ mod tests {
 
     #[test]
     fn filler_words_are_stripped() {
-        assert_eq!(significant("please can you go to the settings now"), vec!["settings"]);
-        assert_eq!(significant("settings open pannunga"), vec!["settings", "open"]);
+        assert_eq!(
+            significant("please can you go to the settings now"),
+            vec!["settings"]
+        );
+        assert_eq!(
+            significant("settings open pannunga"),
+            vec!["settings", "open"]
+        );
     }
 
     #[test]
@@ -558,7 +745,9 @@ mod tests {
                 id: format!("create-task-{}", 100 + i),
                 label: format!("New Task in P{i}"),
                 keywords: ["new", "create", "add", "task"]
-                    .iter().map(|s| s.to_string()).collect(),
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
             });
         }
         let r = resolve_voice_intent("new task", &cmds, &projects());
