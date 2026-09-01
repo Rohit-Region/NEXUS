@@ -102,12 +102,10 @@ fn executed_response(command_id: &str, project_name: Option<&str>) -> String {
         "nav-registry" => "Opening Registry.".to_string(),
         "nav-settings" => "Opening Settings.".to_string(),
         "create-project" => "Opening a new project.".to_string(),
-        id if id.starts_with("create-task-") => {
-            match project_name.and_then(speakable) {
-                Some(name) => format!("Opening a new task in {name}."),
-                None => "Opening a new task.".to_string(),
-            }
-        }
+        id if id.starts_with("create-task-") => match project_name.and_then(speakable) {
+            Some(name) => format!("Opening a new task in {name}."),
+            None => "Opening a new task.".to_string(),
+        },
         // A command added later without a template still gets an
         // acknowledgement rather than silence. Silence is indistinguishable
         // from a broken microphone, which is the failure this milestone exists
@@ -208,7 +206,10 @@ mod tests {
     #[test]
     fn terminal_outcomes_have_fixed_wording() {
         assert_eq!(response_for(&VoiceOutcome::Cancelled), "Cancelled.");
-        assert_eq!(response_for(&VoiceOutcome::Failed), "Sorry, that didn't work.");
+        assert_eq!(
+            response_for(&VoiceOutcome::Failed),
+            "Sorry, that didn't work."
+        );
         assert!(response_for(&VoiceOutcome::NoMatch).starts_with("Sorry,"));
     }
 
@@ -256,9 +257,7 @@ mod tests {
     #[test]
     fn a_pathological_project_name_is_clipped() {
         let long = "A".repeat(500);
-        let spoken = response_for(&VoiceOutcome::OpenedProject {
-            project_name: long,
-        });
+        let spoken = response_for(&VoiceOutcome::OpenedProject { project_name: long });
         assert!(
             spoken.chars().count() <= MAX_SPOKEN_NAME + 16,
             "unclipped name: {} chars",
@@ -277,8 +276,8 @@ mod tests {
 
     #[test]
     fn outcomes_round_trip_as_a_tagged_union() {
-        let json = serde_json::to_string(&executed_in("create-task-1", "Atlas"))
-            .expect("serialize");
+        let json =
+            serde_json::to_string(&executed_in("create-task-1", "Atlas")).expect("serialize");
         assert!(json.contains("\"kind\":\"executed\""), "{json}");
         assert!(json.contains("\"commandId\""), "{json}");
         let back: VoiceOutcome = serde_json::from_str(&json).expect("deserialize");

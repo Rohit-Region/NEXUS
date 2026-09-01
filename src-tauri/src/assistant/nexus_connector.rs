@@ -17,8 +17,8 @@ use crate::db::tasks::{delete_task, insert_task, CreateTaskInput};
 
 use super::action::{ActionError, ActionSpec, DeletedOutput, NavigateOutput};
 use super::connector::{Capabilities, Connector, ConnectorStatus, ExecCtx, ReferentDraft};
-use super::referent::ReferentKind;
 use super::permission::{ConfirmPolicy, Permission, Reach};
+use super::referent::ReferentKind;
 
 pub const CONNECTOR_ID: &str = "nexus";
 
@@ -43,6 +43,36 @@ pub const ACTIONS: &[ActionSpec] = &[
     navigate("nexus.open_project", "Open a project"),
     navigate("nexus.new_project", "Start a new project"),
     navigate("nexus.new_task", "Start a new task"),
+    ActionSpec {
+        // NEXUS-028. Confirmed, like every other write, and here the
+        // confirmation earns its keep twice: it is also NEXUS repeating back
+        // what it heard before agreeing to bring it up later.
+        id: "nexus.remember",
+        connector_id: CONNECTOR_ID,
+        summary: "Remember something for later",
+        permission: Permission::Write,
+        confirm: ConfirmPolicy::Always,
+        reach: Reach::LocalOnly,
+        reversible: true,
+    },
+    ActionSpec {
+        id: "nexus.list_commitments",
+        connector_id: CONNECTOR_ID,
+        summary: "List what you said you would do",
+        permission: Permission::Read,
+        confirm: ConfirmPolicy::Never,
+        reach: Reach::LocalOnly,
+        reversible: true,
+    },
+    ActionSpec {
+        id: "nexus.settle_commitment",
+        connector_id: CONNECTOR_ID,
+        summary: "Mark something done or drop it",
+        permission: Permission::Write,
+        confirm: ConfirmPolicy::Always,
+        reach: Reach::LocalOnly,
+        reversible: true,
+    },
     ActionSpec {
         id: "nexus.create_task",
         connector_id: CONNECTOR_ID,
@@ -90,6 +120,39 @@ struct ProjectRef {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RowRef {
     id: i64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct Remember {
+    /// Verbatim. NEXUS repeats what was said, not its summary of it.
+    what: String,
+    /// Minutes from now. Absent means someday: recorded, never raised, and
+    /// visible where the user can act on it themselves.
+    #[serde(default)]
+    due_in_minutes: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct Settle {
+    id: i64,
+    /// `done` or `dropped`. Validated in the store, not here, so the rule
+    /// lives in one place.
+    state: String,
+}
+
+/// How far "later" pushes a commitment.
+///
+/// Long enough to finish what interrupted you, short enough that "later"
+/// still means today.
+const DEFER_MINUTES: i64 = 30;
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 #[derive(Debug, Deserialize)]
@@ -192,6 +255,24 @@ impl Connector for NexusConnector {
             {
                 Some(name) => format!("Start a new task in {name}"),
                 None => "Start a new task".to_string(),
+            },
+            "nexus.remember" => match serde_json::from_value::<Remember>(input.clone()) {
+                // The user's own words in the prompt, because that is the
+                // thing being agreed to and a paraphrase would hide a
+                // mishearing at the one moment it can still be caught.
+                Ok(r) => match r.due_in_minutes {
+                    Some(mins) => format!("Remind you to \"{}\" in {mins} minutes", r.what.trim()),
+                    None => format!("Remember \"{}\"", r.what.trim()),
+                },
+                Err(_) => "Remember something".to_string(),
+            },
+            "nexus.settle_commitment" => match serde_json::from_value::<Settle>(input.clone()) {
+                Ok(s) if s.state == "done" => "Mark that done".to_string(),
+                Ok(s) if s.state == "later" => {
+                    format!("Bring that back in {DEFER_MINUTES} minutes")
+                }
+                Ok(_) => "Drop that".to_string(),
+                Err(_) => "Settle a commitment".to_string(),
             },
             "nexus.create_task" => match serde_json::from_value::<CreateTask>(input.clone()) {
                 Ok(task) => match project_name(conn, task.project_id) {
@@ -305,6 +386,42 @@ impl Connector for NexusConnector {
         ctx: &ExecCtx<'_>,
     ) -> Result<serde_json::Value, ActionError> {
         match action_id {
+            "nexus.remember" => {
+                let target: Remember =
+                    serde_json::from_value(input).map_err(|e| ActionError::InvalidInput {
+                        detail: e.to_string(),
+                    })?;
+                let due = target.due_in_minutes.map(|m| unix_now() + m * 60);
+                let made = crate::db::commitments::create(ctx.conn, &target.what, due)
+                    .map_err(|detail| ActionError::Failed { detail })?;
+                Ok(serde_json::json!({ "id": made.id, "what": made.what, "dueAt": made.due_at }))
+            }
+
+            "nexus.list_commitments" => {
+                let open = crate::db::commitments::list(ctx.conn, true)
+                    .map_err(|detail| ActionError::Failed { detail })?;
+                Ok(serde_json::json!({ "commitments": open }))
+            }
+
+            "nexus.settle_commitment" => {
+                let target: Settle =
+                    serde_json::from_value(input).map_err(|e| ActionError::InvalidInput {
+                        detail: e.to_string(),
+                    })?;
+                // "later" is the user saying yes, not now. It is not a state
+                // a commitment rests in, so it moves the time instead and
+                // clears `raised_at`: without that, a commitment raised once
+                // could never come back and "later" would quietly mean never.
+                if target.state == "later" {
+                    crate::db::commitments::defer(ctx.conn, target.id, unix_now() + DEFER_MINUTES * 60)
+                        .map_err(|detail| ActionError::Failed { detail })?;
+                    return Ok(serde_json::json!({ "id": target.id, "state": "later" }));
+                }
+                crate::db::commitments::set_state(ctx.conn, target.id, &target.state)
+                    .map_err(|detail| ActionError::Failed { detail })?;
+                Ok(serde_json::json!({ "id": target.id, "state": target.state }))
+            }
+
             "nexus.open_overview" => json(NavigateOutput::screen("overview")),
             "nexus.open_projects" => json(NavigateOutput::screen("projects")),
             "nexus.open_registry" => json(NavigateOutput::screen("registry")),
@@ -423,6 +540,11 @@ mod tests {
                 "nexus.create_task" => j!({ "projectId": project, "title": "From test" }),
                 "nexus.delete_task" => j!({ "id": task }),
                 "nexus.delete_project" => j!({ "id": project }),
+                "nexus.remember" => j!({ "what": "call the dentist", "dueInMinutes": 30 }),
+                "nexus.settle_commitment" => {
+                    let made = crate::db::commitments::create(&conn, "x", None).expect("seed");
+                    j!({ "id": made.id, "state": "done" })
+                }
                 _ => j!(null),
             };
 

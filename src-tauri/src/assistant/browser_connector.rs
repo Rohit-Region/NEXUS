@@ -23,9 +23,7 @@ use rusqlite::Connection;
 use serde::Deserialize;
 
 use super::action::{ActionError, ActionSpec};
-use super::connector::{
-    Capabilities, Connector, ConnectorStatus, ExecCtx, UnavailableAction,
-};
+use super::connector::{Capabilities, Connector, ConnectorStatus, ExecCtx, UnavailableAction};
 use super::permission::{ConfirmPolicy, Permission, Reach};
 use super::shell::{osascript, run, RunError, DEFAULT_TIMEOUT};
 
@@ -43,6 +41,11 @@ const SEARCH_URL: &str = "https://www.google.com/search?q=";
 /// Longest page text handed back. A page is not a document store, and this
 /// value eventually becomes part of a prompt.
 const PAGE_TEXT_CAP: usize = 8_000;
+/// Longest list read back before it stops being an answer and becomes a dump.
+const RESULT_LIST_CAP: usize = 6;
+/// Longest single dictation. A prompt box is not a document editor, and a
+/// runaway transcript should not be pasted somewhere by accident.
+const MAX_DICTATION: usize = 2_000;
 
 const fn spec(
     id: &'static str,
@@ -66,15 +69,83 @@ const fn spec(
 }
 
 pub const ACTIONS: &[ActionSpec] = &[
-    spec("browser.open_url", "Open a page", Permission::Interact, ConfirmPolicy::Never, true),
-    spec("browser.search", "Search the web", Permission::Interact, ConfirmPolicy::Never, true),
-    spec("browser.list_tabs", "List open tabs", Permission::Read, ConfirmPolicy::Never, true),
-    spec("browser.activate_tab", "Switch to a tab", Permission::Interact, ConfirmPolicy::Never, true),
-    spec("browser.navigate", "Navigate the current tab", Permission::Interact, ConfirmPolicy::Never, true),
-    spec("browser.close_tab", "Close a tab", Permission::Write, ConfirmPolicy::Always, false),
-    spec("browser.read_page", "Read the current page", Permission::Execute, ConfirmPolicy::Always, true),
-    spec("browser.click", "Click something on the page", Permission::Execute, ConfirmPolicy::Always, false),
-    spec("browser.type", "Type into the page", Permission::Execute, ConfirmPolicy::Always, false),
+    spec(
+        "browser.open_url",
+        "Open a page",
+        Permission::Interact,
+        ConfirmPolicy::Never,
+        true,
+    ),
+    spec(
+        "browser.search",
+        "Search the web",
+        Permission::Interact,
+        ConfirmPolicy::Never,
+        true,
+    ),
+    spec(
+        "browser.list_tabs",
+        "List open tabs",
+        Permission::Read,
+        ConfirmPolicy::Never,
+        true,
+    ),
+    spec(
+        "browser.activate_tab",
+        "Switch to a tab",
+        Permission::Interact,
+        ConfirmPolicy::Never,
+        true,
+    ),
+    spec(
+        "browser.focus_tab",
+        "Switch to a tab by name",
+        Permission::Interact,
+        ConfirmPolicy::Never,
+        true,
+    ),
+    spec(
+        "browser.navigate",
+        "Navigate the current tab",
+        Permission::Interact,
+        ConfirmPolicy::Never,
+        true,
+    ),
+    spec(
+        "browser.close_tab",
+        "Close a tab",
+        Permission::Write,
+        ConfirmPolicy::Always,
+        false,
+    ),
+    spec(
+        "browser.read_page",
+        "Read the current page",
+        Permission::Execute,
+        ConfirmPolicy::Always,
+        true,
+    ),
+    spec(
+        "browser.click",
+        "Click something on the page",
+        Permission::Execute,
+        ConfirmPolicy::Always,
+        false,
+    ),
+    spec(
+        "browser.type",
+        "Type into the page",
+        Permission::Execute,
+        ConfirmPolicy::Always,
+        false,
+    ),
+    spec(
+        "browser.type_here",
+        "Type into the box you have focused",
+        Permission::Execute,
+        ConfirmPolicy::Always,
+        false,
+    ),
 ];
 
 // -- Typed inputs -------------------------------------------------------------
@@ -100,8 +171,20 @@ struct TabRef {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TabQuery {
+    query: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SelectorInput {
     selector: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DictateInput {
+    text: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -251,6 +334,28 @@ fn parse_tabs(raw: &str) -> Vec<TabInfo> {
         .collect()
 }
 
+/// Does this tab match what the user said?
+///
+/// **Every word of the query must appear somewhere in the title or URL**, in
+/// any order, ignoring case. Substring matching was the obvious rule and it
+/// was wrong twice over: "player zero" is not a substring of "PlayerZero",
+/// and "clone ui repo" is not a substring of "Clone the UI repo". Words are
+/// what people actually remember about a tab.
+///
+/// Matching per word rather than per token also means a word can land inside
+/// a longer one, which is what makes "player" find "PlayerZero".
+pub fn tab_matches(query: &str, title: &str, url: &str) -> bool {
+    let haystack = format!("{} {}", title.to_lowercase(), url.to_lowercase());
+    let words: Vec<&str> = query
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    if words.is_empty() {
+        return false;
+    }
+    words.iter().all(|w| haystack.contains(&w.to_lowercase()))
+}
+
 pub struct BrowserConnector;
 
 impl Connector for BrowserConnector {
@@ -311,6 +416,14 @@ impl Connector for BrowserConnector {
                 Ok(q) => format!("Search the web for \"{}\"", q.query),
                 Err(_) => "Search the web".to_string(),
             },
+            "browser.type_here" => match serde_json::from_value::<DictateInput>(input.clone()) {
+                Ok(d) => format!("Type into the focused box: \"{}\"", d.text.trim()),
+                Err(_) => "Type into the focused box".to_string(),
+            },
+            "browser.focus_tab" => match serde_json::from_value::<TabQuery>(input.clone()) {
+                Ok(q) => format!("Switch to the \"{}\" tab", q.query),
+                Err(_) => "Switch to a tab".to_string(),
+            },
             "browser.close_tab" => match serde_json::from_value::<TabRef>(input.clone()) {
                 Ok(t) => format!(
                     "Close tab {} in Chrome window {}",
@@ -352,6 +465,66 @@ impl Connector for BrowserConnector {
             "browser.type" => parse::<TypeInput>(input.clone()).map(|_| ()),
             _ => Ok(()),
         }
+    }
+
+    fn describe_result(&self, action_id: &str, output: &serde_json::Value) -> Option<String> {
+        match action_id {
+            "browser.list_tabs" => {
+                let tabs = output.get("tabs")?.as_array()?;
+                if tabs.is_empty() {
+                    return Some("Chrome has no tabs open.".to_string());
+                }
+                // Titles, not URLs: a title is what the user recognises, and
+                // a list of URLs is unreadable aloud.
+                let named: Vec<String> = tabs
+                    .iter()
+                    .filter_map(|t| t.get("title").and_then(|v| v.as_str()))
+                    .filter(|t| !t.trim().is_empty())
+                    .take(RESULT_LIST_CAP)
+                    .map(|t| t.chars().take(60).collect::<String>())
+                    .collect();
+                let more = tabs.len().saturating_sub(named.len());
+                let mut text = format!(
+                    "{} tab{} open: {}",
+                    tabs.len(),
+                    if tabs.len() == 1 { "" } else { "s" },
+                    named.join(", ")
+                );
+                if more > 0 {
+                    text.push_str(&format!(", and {more} more"));
+                }
+                text.push('.');
+                Some(text)
+            }
+            "browser.read_page" => {
+                let text = output.get("text")?.as_str()?;
+                let first: String = text.lines().take(3).collect::<Vec<_>>().join(" ");
+                Some(format!(
+                    "{}...",
+                    first.chars().take(280).collect::<String>()
+                ))
+            }
+            "browser.open_url" | "browser.search" => {
+                Some(format!("Opened {}.", output.get("url")?.as_str()?))
+            }
+            "browser.type_here" => Some("Typed it in.".to_string()),
+            "browser.focus_tab" => {
+                let title: String = output.get("title")?.as_str()?.chars().take(70).collect();
+                let others = output.get("alsoMatched")?.as_u64().unwrap_or(0);
+                Some(if others > 0 {
+                    // Saying so matters: with four PlayerZero tabs open, "the
+                    // first match" is not obviously the one they meant.
+                    format!("Switched to {title}. {others} other tabs also matched.")
+                } else {
+                    format!("Switched to {title}.")
+                })
+            }
+            _ => None,
+        }
+    }
+
+    fn zero_input_actions(&self) -> &'static [&'static str] {
+        &["browser.list_tabs", "browser.read_page"]
     }
 
     fn dispatch(
@@ -402,6 +575,71 @@ impl Connector for BrowserConnector {
                     return Err(from_script_failure(&out.stderr));
                 }
                 json(serde_json::json!({ "tabs": parse_tabs(&out.stdout) }))
+            }
+
+            // Switching by name rather than by index, because nobody knows
+            // which number their Jira tab is, and a spoken index would be a
+            // guess the moment a tab is opened or closed.
+            "browser.focus_tab" => {
+                let target: TabQuery = parse(input)?;
+                let query = target.query.trim().to_string();
+                if query.is_empty() {
+                    return Err(ActionError::InvalidInput {
+                        detail: "There was no tab name to look for.".to_string(),
+                    });
+                }
+
+                // Listed first, then matched in Rust. Doing the matching in
+                // AppleScript meant a substring test that could not be tested
+                // and got the rule wrong; here it is a pure function with
+                // cases pinned by unit tests.
+                let listing = osascript(&list_tabs_script(), &[]).map_err(from_run_error)?;
+                if !listing.success {
+                    return Err(from_script_failure(&listing.stderr));
+                }
+
+                let tabs = parse_tabs(&listing.stdout);
+                let hits: Vec<&TabInfo> = tabs
+                    .iter()
+                    .filter(|tab| tab_matches(&query, &tab.title, &tab.url))
+                    .collect();
+
+                let chosen = match hits.first() {
+                    Some(tab) => *tab,
+                    None => {
+                        return Err(ActionError::Failed {
+                            detail: format!("No open tab matches \"{query}\"."),
+                        })
+                    }
+                };
+
+                let out = osascript(
+                    &[
+                        "set w to (item 1 of argv) as integer",
+                        "set t to (item 2 of argv) as integer",
+                        "tell application \"Google Chrome\"",
+                        "set active tab index of window w to t",
+                        "set index of window w to 1",
+                        "activate",
+                        "end tell",
+                        "return \"ok\"",
+                    ],
+                    &[
+                        &chosen.window_index.to_string(),
+                        &chosen.tab_index.to_string(),
+                    ],
+                )
+                .map_err(from_run_error)?;
+
+                if !out.success {
+                    return Err(from_script_failure(&out.stderr));
+                }
+                json(serde_json::json!({
+                    "title": chosen.title,
+                    "url": chosen.url,
+                    "query": query,
+                    "alsoMatched": hits.len().saturating_sub(1),
+                }))
             }
 
             "browser.activate_tab" => {
@@ -517,13 +755,89 @@ impl Connector for BrowserConnector {
                 }
                 if out.stdout == "missing" {
                     return Err(ActionError::Failed {
-                        detail: format!(
-                            "Nothing on the page matches \"{}\".",
-                            target.selector
-                        ),
+                        detail: format!("Nothing on the page matches \"{}\".", target.selector),
                     });
                 }
                 json(serde_json::json!({ "clicked": true }))
+            }
+
+            // Dictation into whatever the user has already focused.
+            //
+            // `browser.type` needs a CSS selector, which nobody says out
+            // loud. This needs none: the user clicks the box, then speaks,
+            // and the focused element is a fact rather than a guess. If
+            // nothing is focused it falls back to the page's only editable
+            // field, and refuses when that is ambiguous rather than picking.
+            "browser.type_here" => {
+                let target: DictateInput = parse(input)?;
+                let text = target.text.trim();
+                if text.is_empty() {
+                    return Err(ActionError::InvalidInput {
+                        detail: "There was nothing to type.".to_string(),
+                    });
+                }
+                if text.chars().count() > MAX_DICTATION {
+                    return Err(ActionError::InvalidInput {
+                        detail: format!("That is longer than {MAX_DICTATION} characters."),
+                    });
+                }
+
+                // Encoded as a JSON string literal in Rust, which is also a
+                // valid JavaScript string literal. The text therefore reaches
+                // the page as data and can never become syntax, however many
+                // quotes or backslashes are in it.
+                let literal = serde_json::to_string(text).map_err(|e| ActionError::Failed {
+                    detail: format!("Could not encode the text: {e}"),
+                })?;
+
+                let out = osascript(
+                    &[
+                        "set t to (item 1 of argv)",
+                        "tell application \"Google Chrome\"",
+                        "set r to execute active tab of front window javascript \
+                         (\"(function(t){\
+                         var a=document.activeElement;\
+                         var ed=function(e){return e&&(e.isContentEditable||\
+                           e.tagName==='TEXTAREA'||(e.tagName==='INPUT'&&\
+                           /^(text|search|email|url|tel|)$/i.test(e.type||'')));};\
+                         if(!ed(a)){\
+                           var c=[].slice.call(document.querySelectorAll(\
+                             'textarea,input[type=text],input:not([type]),[contenteditable=true]'))\
+                             .filter(function(e){var r=e.getBoundingClientRect();\
+                               return r.width>0&&r.height>0&&!e.disabled&&!e.readOnly;});\
+                           if(c.length!==1){return c.length?'ambiguous':'nofield';}\
+                           a=c[0];a.focus();\
+                         }\
+                         if(a.isContentEditable){\
+                           document.execCommand('insertText',false,t);\
+                         }else{\
+                           var p=Object.getPrototypeOf(a);\
+                           var d=Object.getOwnPropertyDescriptor(p,'value');\
+                           if(d&&d.set){d.set.call(a,(a.value||'')+t);}else{a.value=(a.value||'')+t;}\
+                           a.dispatchEvent(new Event('input',{bubbles:true}));\
+                         }\
+                         return 'typed';})(\" & t & \")\")",
+                        "end tell",
+                        "return r",
+                    ],
+                    &[&literal],
+                )
+                .map_err(from_run_error)?;
+
+                if !out.success {
+                    return Err(from_script_failure(&out.stderr));
+                }
+                match out.stdout.as_str() {
+                    "typed" => json(serde_json::json!({ "typed": true, "text": text })),
+                    "ambiguous" => Err(ActionError::Failed {
+                        detail: "This page has several text boxes. Click the one you want \
+                                 first, then say it again."
+                            .to_string(),
+                    }),
+                    _ => Err(ActionError::Failed {
+                        detail: "There is no text box on this page to type into.".to_string(),
+                    }),
+                }
             }
 
             "browser.type" => {
@@ -550,10 +864,7 @@ impl Connector for BrowserConnector {
                 }
                 if out.stdout == "missing" {
                     return Err(ActionError::Failed {
-                        detail: format!(
-                            "Nothing on the page matches \"{}\".",
-                            target.selector
-                        ),
+                        detail: format!("Nothing on the page matches \"{}\".", target.selector),
                     });
                 }
                 json(serde_json::json!({ "typed": true }))
@@ -658,12 +969,95 @@ mod tests {
     #[test]
     fn a_title_containing_a_tab_or_pipe_does_not_corrupt_the_listing() {
         // The reason the separators are control characters.
-        let raw = format!(
-            "1{FIELD_SEP}1{FIELD_SEP}https://a.example{FIELD_SEP}A | B\tC{RECORD_SEP}"
-        );
+        let raw =
+            format!("1{FIELD_SEP}1{FIELD_SEP}https://a.example{FIELD_SEP}A | B\tC{RECORD_SEP}");
         let tabs = parse_tabs(&raw);
         assert_eq!(tabs.len(), 1);
         assert_eq!(tabs[0].title, "A | B\tC");
+    }
+
+    // -- Tab matching, against the titles that actually broke it -----------
+
+    /// The four PlayerZero tabs that were open when this rule was wrong.
+    const REAL_TITLES: [&str; 4] = [
+        "Add scenario to simulation playlist | PlayerZero",
+        "Clone the UI repo | PlayerZero",
+        "Help Creating a PPT | PlayerZero",
+        "Radius mismatch after clearing filters | PlayerZero",
+    ];
+
+    #[test]
+    fn two_words_find_a_one_word_name() {
+        // "player zero" is not a substring of "PlayerZero". Per-word matching
+        // is what makes this work, and substring matching is what broke it.
+        assert!(tab_matches("player zero", REAL_TITLES[0], ""));
+        assert!(tab_matches("PLAYER ZERO", REAL_TITLES[1], ""));
+        assert!(tab_matches("playerzero", REAL_TITLES[2], ""));
+    }
+
+    #[test]
+    fn dropped_filler_words_no_longer_break_the_match() {
+        // The resolver strips "the", so the query arrives as "clone ui repo"
+        // while the title still says "Clone the UI repo". Word matching does
+        // not care about the gap; substring matching did.
+        assert!(tab_matches("clone ui repo", REAL_TITLES[1], ""));
+        assert!(tab_matches("clone repo", REAL_TITLES[1], ""));
+    }
+
+    #[test]
+    fn word_order_does_not_matter() {
+        assert!(tab_matches("repo clone", REAL_TITLES[1], ""));
+        assert!(tab_matches("ppt creating help", REAL_TITLES[2], ""));
+    }
+
+    #[test]
+    fn a_word_that_is_not_there_fails_the_match() {
+        // All words must appear, or "clone the android repo" would happily
+        // match the UI one.
+        assert!(!tab_matches("clone android repo", REAL_TITLES[1], ""));
+        assert!(!tab_matches("jira", REAL_TITLES[0], ""));
+    }
+
+    #[test]
+    fn the_url_counts_as_well_as_the_title() {
+        assert!(tab_matches(
+            "atlassian",
+            "PROJ-1069",
+            "https://your-team.atlassian.net/browse/PROJ-1069"
+        ));
+        assert!(tab_matches(
+            "proj 1069",
+            "Some issue",
+            "https://your-team.atlassian.net/browse/PROJ-1069"
+        ));
+    }
+
+    #[test]
+    fn a_specific_query_narrows_to_one_of_several() {
+        // Four tabs share "PlayerZero"; naming the distinguishing words picks
+        // exactly one.
+        let hits: Vec<&str> = REAL_TITLES
+            .iter()
+            .copied()
+            .filter(|t| tab_matches("help creating a ppt", t, ""))
+            .collect();
+        assert_eq!(hits, vec![REAL_TITLES[2]]);
+    }
+
+    #[test]
+    fn a_shared_word_matches_all_of_them() {
+        let hits = REAL_TITLES
+            .iter()
+            .filter(|t| tab_matches("playerzero", t, ""))
+            .count();
+        assert_eq!(hits, 4, "the caller is told how many others matched");
+    }
+
+    #[test]
+    fn an_empty_query_matches_nothing() {
+        assert!(!tab_matches("", REAL_TITLES[0], ""));
+        assert!(!tab_matches("   ", REAL_TITLES[0], ""));
+        assert!(!tab_matches("!!!", REAL_TITLES[0], ""));
     }
 
     #[test]

@@ -48,3 +48,20 @@
 .dashboard__watermark-text .accent {
   color: #181010;
 }
+
+/*
+ * The watermark sat behind the core and read as a smudge across the middle
+ * of the HUD: two large things competing in the same place, and the one that
+ * carries no information winning on size. Pinned to the bottom and taken
+ * down further in opacity so it is a texture at the edge of the page rather
+ * than a shape behind the content.
+ */
+.dashboard__watermark {
+  align-items: flex-end;
+  opacity: 0.45;
+}
+
+.dashboard__watermark-text {
+  font-size: clamp(60px, 10vw, 130px);
+  transform: translateY(18%);
+}

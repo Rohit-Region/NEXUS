@@ -9,7 +9,10 @@ import {
   voiceListVoices,
 } from '../../lib/nexus-db';
 import type { RegistryEntry, Settings, VoiceOption } from '../../types/db';
+import { NotificationsPanel } from '../NotificationsPanel/NotificationsPanel';
 import { PermissionsPanel } from '../PermissionsPanel/PermissionsPanel';
+import { ContactsPanel } from '../ContactsPanel/ContactsPanel';
+import { ReasoningPanel } from '../ReasoningPanel/ReasoningPanel';
 import { SettingsForm } from '../SettingsForm/SettingsForm';
 import './SettingsScreen.css';
 
@@ -189,7 +192,13 @@ export function SettingsScreen({ settings, onSettingsChange }: SettingsScreenPro
       {/* NEXUS-012. Its own panel rather than a fieldset in SettingsForm:
           the form is presentational and calls no command, and permissions
           are read and written live rather than saved with the rest. */}
+      <ReasoningPanel />
+
+      <ContactsPanel />
+
       <PermissionsPanel />
+
+      <NotificationsPanel />
     </section>
   );
 }

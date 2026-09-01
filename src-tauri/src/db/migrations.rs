@@ -178,4 +178,72 @@ pub const MIGRATIONS: &[(i64, &str)] = &[
         );
         ",
     ),
+    (
+        6,
+        "
+        -- Migration 006: contacts.
+        --
+        -- WhatsApp identifies people by number, so 'message Divi' could not
+        -- resolve to anyone: there was nowhere for a name to become a
+        -- number. This is that mapping and nothing more.
+        --
+        -- Typed by the user, never synced. NEXUS does not read the macOS
+        -- address book, so the only people it knows are the ones deliberately
+        -- put here.
+        --
+        -- The number is stored as given and validated at use, not on write:
+        -- validation lives in one place (whatsapp_connector::valid_phone) and
+        -- a row that fails it should report that rather than be silently
+        -- unstorable.
+        CREATE TABLE IF NOT EXISTS contacts (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            name       TEXT NOT NULL,
+            phone      TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        );
+
+        -- Names are matched case-insensitively when spoken, so two contacts
+        -- differing only in case would be an ambiguity with no way to
+        -- resolve it by voice.
+        CREATE UNIQUE INDEX IF NOT EXISTS contacts_name_unique
+            ON contacts (name COLLATE NOCASE);
+        ",
+    ),
+    (
+        7,
+        "
+        -- Migration 007: commitments. NEXUS-028.
+        --
+        -- The shorter-lived thing you say out loud and forget by lunchtime.
+        -- Deliberately not a task: tasks belong to a project, outlive a day,
+        -- and are something you go and look at. A commitment is something
+        -- NEXUS brings back to you once, at a time you named, and then stops.
+        --
+        -- **Only what the user said explicitly lands here.** Nothing is
+        -- inferred from conversation. A system that guesses at commitments
+        -- will be wrong often, and being reminded of something you never
+        -- agreed to is worse than not being reminded at all.
+        --
+        -- `raised_at` is what makes 'once' true: a commitment is brought up
+        -- when due and then left alone, however long it stays open. Nagging
+        -- is what trains someone to ignore an assistant.
+        CREATE TABLE IF NOT EXISTS commitments (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            -- The user's own words, kept verbatim so NEXUS repeats what they
+            -- said rather than its own summary of it.
+            what       TEXT    NOT NULL,
+            -- Unix seconds. Null means someday: recorded, never raised, and
+            -- visible in the UI where the user can act on it themselves.
+            due_at     INTEGER,
+            -- open | done | dropped
+            state      TEXT    NOT NULL DEFAULT 'open',
+            raised_at  INTEGER,
+            created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS commitments_due
+            ON commitments (state, due_at);
+        ",
+    ),
 ];

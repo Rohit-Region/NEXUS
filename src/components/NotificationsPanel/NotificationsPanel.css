@@ -1,0 +1,149 @@
+/* NEXUS-024/028. Matches the PermissionsPanel idiom: this is a settings
+   surface, not a feature of its own, and should not look like one. */
+
+.notif-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem 0;
+}
+
+.notif-panel h2,
+.notif-panel h3 {
+  margin: 0;
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--nexus-dim, #8a8a8a);
+}
+
+.notif-panel h3 {
+  margin-top: 0.5rem;
+}
+
+.notif-hint {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--nexus-dim, #8a8a8a);
+}
+
+/* A refusal, not an absence. Coloured like an error because that is what it
+   is: something the user has to act on, not a quiet afternoon. */
+.notif-blocked {
+  margin: 0;
+  padding: 0.5rem 0.65rem;
+  font-size: 0.8rem;
+  border: 1px solid var(--nexus-red, #ff4d4d);
+  border-radius: 3px;
+  color: var(--nexus-red, #ff4d4d);
+}
+
+.notif-error {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--nexus-red, #ff4d4d);
+}
+
+.notif-apps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.notif-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.8rem;
+  border: 1px solid var(--nexus-line, #2a2a2a);
+  border-radius: 999px;
+}
+
+.notif-chip button,
+.notif-commitments button {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--nexus-dim, #8a8a8a);
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.notif-chip button:hover,
+.notif-commitments button:hover {
+  color: var(--nexus-red, #ff4d4d);
+}
+
+.notif-add {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.notif-add input {
+  flex: 1;
+  padding: 0.35rem 0.5rem;
+  font: inherit;
+  font-size: 0.8rem;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--nexus-line, #2a2a2a);
+  border-radius: 3px;
+}
+
+.notif-add button,
+.notif-suggest button {
+  padding: 0.35rem 0.6rem;
+  font: inherit;
+  font-size: 0.75rem;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--nexus-line, #2a2a2a);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.notif-add button:hover,
+.notif-suggest button:hover {
+  border-color: var(--nexus-red, #ff4d4d);
+}
+
+.notif-suggest {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.notif-aggression {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+}
+
+.notif-aggression label {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  cursor: pointer;
+}
+
+.notif-commitments {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.8rem;
+}
+
+.notif-commitments li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.3rem 0;
+  border-bottom: 1px solid var(--nexus-line, #2a2a2a);
+}

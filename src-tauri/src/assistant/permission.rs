@@ -235,7 +235,9 @@ mod tests {
     #[test]
     fn an_unknown_connector_has_no_grants() {
         let conn = test_conn();
-        assert!(granted_levels(&conn, "salesforce").expect("read").is_empty());
+        assert!(granted_levels(&conn, "salesforce")
+            .expect("read")
+            .is_empty());
         assert!(!is_granted(&conn, "salesforce", Permission::Read).expect("read"));
     }
 

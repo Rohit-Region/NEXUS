@@ -65,7 +65,8 @@ const STALE_DAYS: i64 = 14;
 pub const MAX_SUGGESTIONS: usize = 6;
 
 fn count(conn: &Connection, sql: &str) -> i64 {
-    conn.query_row(sql, [], |row| row.get::<_, i64>(0)).unwrap_or(0)
+    conn.query_row(sql, [], |row| row.get::<_, i64>(0))
+        .unwrap_or(0)
 }
 
 /// Blocked work, which is the thing most worth surfacing in a task tool.
@@ -102,7 +103,11 @@ fn blocked_tasks(conn: &Connection) -> Option<Suggestion> {
         } else {
             format!("{total} tasks are blocked")
         },
-        priority: if total >= 3 { Priority::High } else { Priority::Normal },
+        priority: if total >= 3 {
+            Priority::High
+        } else {
+            Priority::Normal
+        },
         reason: Reason {
             rule: "blocked-tasks".to_string(),
             explanation: "Blocked work does not move on its own.".to_string(),
@@ -129,8 +134,10 @@ fn stale_tasks(conn: &Connection) -> Option<Suggestion> {
     }
     Some(Suggestion {
         key: "stale-tasks".to_string(),
-        title: format!("{total} open task{} untouched for {STALE_DAYS} days",
-            if total == 1 { "" } else { "s" }),
+        title: format!(
+            "{total} open task{} untouched for {STALE_DAYS} days",
+            if total == 1 { "" } else { "s" }
+        ),
         priority: Priority::Low,
         reason: Reason {
             rule: "stale-tasks".to_string(),
@@ -157,29 +164,30 @@ fn projects_without_a_path(conn: &Connection) -> Vec<Suggestion> {
         Err(_) => return Vec::new(),
     };
 
-    stmt.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))
-        .map(|rows| {
-            rows.filter_map(|r| r.ok())
-                .map(|(id, name)| Suggestion {
-                    // Keyed by the project, so dismissing one does not silence
-                    // the rule for every other project.
-                    key: format!("project-path:{id}"),
-                    title: format!("{name} has no folder on disk"),
-                    priority: Priority::Low,
-                    reason: Reason {
-                        rule: "project-missing-path".to_string(),
-                        explanation:
-                            "Without a folder, NEXUS cannot open this project in an editor."
-                                .to_string(),
-                        evidence: vec![name.clone()],
-                    },
-                    action_id: "nexus.open_project".to_string(),
-                    action_input: serde_json::json!({ "projectId": id }),
-                    accept_label: "Add one".to_string(),
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+    stmt.query_map([], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+    })
+    .map(|rows| {
+        rows.filter_map(|r| r.ok())
+            .map(|(id, name)| Suggestion {
+                // Keyed by the project, so dismissing one does not silence
+                // the rule for every other project.
+                key: format!("project-path:{id}"),
+                title: format!("{name} has no folder on disk"),
+                priority: Priority::Low,
+                reason: Reason {
+                    rule: "project-missing-path".to_string(),
+                    explanation: "Without a folder, NEXUS cannot open this project in an editor."
+                        .to_string(),
+                    evidence: vec![name.clone()],
+                },
+                action_id: "nexus.open_project".to_string(),
+                action_input: serde_json::json!({ "projectId": id }),
+                accept_label: "Add one".to_string(),
+            })
+            .collect()
+    })
+    .unwrap_or_default()
 }
 
 /// A project pointing at a repository NEXUS could be reading pull requests
@@ -194,28 +202,30 @@ fn projects_with_a_repo(conn: &Connection) -> Vec<Suggestion> {
         Err(_) => return Vec::new(),
     };
 
-    stmt.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))
-        .map(|rows| {
-            rows.filter_map(|r| r.ok())
-                .map(|(id, name)| Suggestion {
-                    key: format!("check-prs:{id}"),
-                    title: format!("Check open pull requests for {name}"),
-                    priority: Priority::Normal,
-                    reason: Reason {
-                        rule: "project-has-repository".to_string(),
-                        explanation: format!(
-                            "{name} points at a GitHub repository, so NEXUS can read its \
+    stmt.query_map([], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+    })
+    .map(|rows| {
+        rows.filter_map(|r| r.ok())
+            .map(|(id, name)| Suggestion {
+                key: format!("check-prs:{id}"),
+                title: format!("Check open pull requests for {name}"),
+                priority: Priority::Normal,
+                reason: Reason {
+                    rule: "project-has-repository".to_string(),
+                    explanation: format!(
+                        "{name} points at a GitHub repository, so NEXUS can read its \
                              pull requests and their checks."
-                        ),
-                        evidence: vec![name.clone()],
-                    },
-                    action_id: "github.list_prs".to_string(),
-                    action_input: serde_json::json!({ "projectId": id }),
-                    accept_label: "Show them".to_string(),
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+                    ),
+                    evidence: vec![name.clone()],
+                },
+                action_id: "github.list_prs".to_string(),
+                action_input: serde_json::json!({ "projectId": id }),
+                accept_label: "Show them".to_string(),
+            })
+            .collect()
+    })
+    .unwrap_or_default()
 }
 
 /// An editor registered at a path that is no longer there.
@@ -358,9 +368,16 @@ mod tests {
         task(&conn, p, "Ship referents", "blocked");
 
         let found = generate(&conn);
-        let blocked = found.iter().find(|s| s.key == "blocked-tasks").expect("raised");
+        let blocked = found
+            .iter()
+            .find(|s| s.key == "blocked-tasks")
+            .expect("raised");
         assert!(blocked.title.contains('2'));
-        assert!(blocked.reason.evidence.iter().any(|e| e.contains("Wire the gate")));
+        assert!(blocked
+            .reason
+            .evidence
+            .iter()
+            .any(|e| e.contains("Wire the gate")));
         assert!(!blocked.reason.explanation.is_empty());
     }
 
@@ -402,7 +419,10 @@ mod tests {
         )
         .expect("seed");
         let found = generate(&conn);
-        let broken = found.iter().find(|s| s.key == "broken-editors").expect("raised");
+        let broken = found
+            .iter()
+            .find(|s| s.key == "broken-editors")
+            .expect("raised");
         assert_eq!(broken.action_id, "ide.discover");
         assert!(broken.reason.evidence.contains(&"Ghost".to_string()));
     }
@@ -448,7 +468,8 @@ mod tests {
         task(&conn, p, "Wire the gate", "blocked");
         assert!(generate(&conn).iter().any(|s| s.key == "blocked-tasks"));
 
-        conn.execute("DELETE FROM projects WHERE id = ?1", [p]).expect("delete");
+        conn.execute("DELETE FROM projects WHERE id = ?1", [p])
+            .expect("delete");
         assert!(generate(&conn).iter().all(|s| s.key != "blocked-tasks"));
     }
 
@@ -468,7 +489,12 @@ mod tests {
     fn the_list_is_capped_and_ordered_by_priority() {
         let conn = test_conn();
         for i in 0..10 {
-            let p = project(&conn, &format!("P{i}"), None, Some("https://github.com/a/b"));
+            let p = project(
+                &conn,
+                &format!("P{i}"),
+                None,
+                Some("https://github.com/a/b"),
+            );
             task(&conn, p, "blocked one", "blocked");
         }
         let found = generate(&conn);
@@ -485,7 +511,11 @@ mod tests {
         task(&conn, p, "Wire the gate", "blocked");
         for suggestion in generate(&conn) {
             assert!(!suggestion.reason.rule.is_empty(), "{}", suggestion.key);
-            assert!(!suggestion.reason.explanation.is_empty(), "{}", suggestion.key);
+            assert!(
+                !suggestion.reason.explanation.is_empty(),
+                "{}",
+                suggestion.key
+            );
             assert!(!suggestion.accept_label.is_empty(), "{}", suggestion.key);
             assert!(!suggestion.action_id.is_empty(), "{}", suggestion.key);
         }
@@ -509,7 +539,11 @@ mod tests {
             let known = crate::assistant::connectors()
                 .into_iter()
                 .any(|c| c.spec(&suggestion.action_id).is_some());
-            assert!(known, "{} proposes {}", suggestion.key, suggestion.action_id);
+            assert!(
+                known,
+                "{} proposes {}",
+                suggestion.key, suggestion.action_id
+            );
         }
     }
 

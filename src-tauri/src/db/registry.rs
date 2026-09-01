@@ -59,12 +59,12 @@ pub fn validate_entry(name: &str, entry_type: &str) -> Result<(), String> {
 /// Both modules SELECT their columns in this order, so one mapper serves both.
 pub fn map_entry_row(row: &rusqlite::Row<'_>) -> RusqliteResult<RegistryEntry> {
     Ok(RegistryEntry {
-        id:              row.get(0)?,
-        name:            row.get(1)?,
-        entry_type:      row.get(2)?,
+        id: row.get(0)?,
+        name: row.get(1)?,
+        entry_type: row.get(2)?,
         executable_path: row.get(3)?,
-        enabled:         row.get(4)?,
-        created_at:      row.get(5)?,
-        updated_at:      row.get(6)?,
+        enabled: row.get(4)?,
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
     })
 }

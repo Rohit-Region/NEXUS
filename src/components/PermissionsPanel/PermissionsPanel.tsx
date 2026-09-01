@@ -3,6 +3,7 @@ import { RefreshCw, ShieldCheck } from 'lucide-react';
 import {
   listAudit,
   listConnectors,
+  setConnectorConfig,
   setConnectorEnabled,
   setPermissionGrant,
 } from '../../lib/assistant';
@@ -60,6 +61,34 @@ function shortTime(stamp: string): string {
  * Every grant is checked again in Rust the moment an action is attempted, so
  * turning one off stops the action rather than merely hiding a button.
  */
+/**
+ * Configuration a connector needs before it can do anything.
+ *
+ * Declared here rather than derived, because an empty config carries no
+ * indication of what belongs in it: a connector that has never been set up
+ * would otherwise render no fields and look finished. Secrets are absent by
+ * design; Rust refuses to store them and they live in the Keychain.
+ */
+const CONFIG_FIELDS: Record<
+  string,
+  Array<{ key: string; label: string; placeholder: string; hint: string }>
+> = {
+  jira: [
+    {
+      key: 'site',
+      label: 'Site address',
+      placeholder: 'https://your-team.atlassian.net',
+      hint: 'Enough on its own to open issues in the browser.',
+    },
+    {
+      key: 'email',
+      label: 'Account email',
+      placeholder: 'you@company.com',
+      hint: 'Only needed to read issues and comments, which also needs an API token in the Keychain.',
+    },
+  ],
+};
+
 export function PermissionsPanel() {
   const [connectors, setConnectors] = useState<ConnectorView[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
@@ -94,6 +123,36 @@ export function PermissionsPanel() {
     setError(null);
     try {
       setConnectors(await setPermissionGrant(connectorId, level, granted));
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Pending edits, keyed `connectorId.field`. Absent means unedited. */
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+
+  async function saveConfig(connector: ConnectorView) {
+    const fields = CONFIG_FIELDS[connector.id] ?? [];
+    const next: Record<string, string> = {};
+    for (const field of fields) {
+      const draft = drafts[`${connector.id}.${field.key}`];
+      const value = draft ?? connector.config?.[field.key] ?? '';
+      // Empty values are dropped rather than stored: a blank string reads as
+      // configured-but-wrong, and the connectors test for emptiness anyway.
+      if (value.trim().length > 0) next[field.key] = value.trim();
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await setConnectorConfig(connector.id, next);
+      setDrafts((prev) => {
+        const rest = { ...prev };
+        for (const field of fields) delete rest[`${connector.id}.${field.key}`];
+        return rest;
+      });
+      await load();
     } catch (err) {
       setError(String(err));
     } finally {
@@ -191,6 +250,44 @@ export function PermissionsPanel() {
                 </li>
               ))}
             </ul>
+
+            {CONFIG_FIELDS[connector.id] && (
+              <div className="permissions-panel__config">
+                {CONFIG_FIELDS[connector.id].map((field) => {
+                  const id = `${connector.id}.${field.key}`;
+                  return (
+                    <label className="permissions-panel__config-field" key={id}>
+                      <span className="permissions-panel__config-label">
+                        {field.label}
+                      </span>
+                      <input
+                        className="nexus-input"
+                        type="text"
+                        spellCheck={false}
+                        autoComplete="off"
+                        placeholder={field.placeholder}
+                        value={drafts[id] ?? connector.config?.[field.key] ?? ''}
+                        onChange={(e) =>
+                          setDrafts((prev) => ({ ...prev, [id]: e.target.value }))
+                        }
+                        disabled={busy}
+                      />
+                      <span className="permissions-panel__grant-hint">
+                        {field.hint}
+                      </span>
+                    </label>
+                  );
+                })}
+                <button
+                  className="nexus-btn nexus-btn--secondary"
+                  type="button"
+                  onClick={() => void saveConfig(connector)}
+                  disabled={busy}
+                >
+                  Save {connector.displayName} settings
+                </button>
+              </div>
+            )}
           </div>
         ))}
 

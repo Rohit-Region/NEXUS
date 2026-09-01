@@ -174,6 +174,14 @@ export interface Settings {
    * a guarantee.
    */
   voiceName: string;
+  /**
+   * Keep the microphone open for the wake word, rather than opening it only
+   * when asked. Off by default: it changes when the microphone is live, so
+   * it is a choice made once and remembered.
+   */
+  alwaysListening: boolean;
+  /** What NEXUS says back when called by name. Rotated in order. */
+  wakeReplies: string[];
 }
 
 // NEXUS-009: unified cross-entity search, deferred from NEXUS-007.
@@ -273,6 +281,41 @@ export interface VoiceOption {
   gender: 'male' | 'female' | 'unspecified';
   /** True for en-IN, the locale NEXUS recognises in. */
   preferredLocale: boolean;
+}
+
+/**
+ * Someone NEXUS can message by name.
+ *
+ * Typed by the user and never synced: NEXUS does not read the macOS address
+ * book, so the only people it knows are the ones deliberately entered.
+ */
+export interface Contact {
+  id: number;
+  name: string;
+  /** International format, digits only, as stored. */
+  phone: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ContactInput {
+  /** Absent when creating. */
+  id: number | null;
+  name: string;
+  phone: string;
+}
+
+/** What a transcript heard in always-listening mode amounts to. */
+export interface WakeOutcome {
+  /**
+   * False for everything not addressed to NEXUS, which is most of what a
+   * permanently open microphone hears. The caller must then do nothing.
+   */
+  woke: boolean;
+  /** A command spoken in the same breath as the wake word. */
+  command: string | null;
+  /** The acknowledgement to speak, when the wake word came alone. */
+  reply: string | null;
 }
 
 export interface VoiceSpeech {

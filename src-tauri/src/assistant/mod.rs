@@ -14,8 +14,11 @@
 
 pub mod action;
 pub mod approval;
+pub mod claude_provider;
+pub mod wa_contacts;
 pub mod audit;
 pub mod browser_connector;
+pub mod calendar;
 pub mod cloud_provider;
 pub mod connector;
 pub mod context;
@@ -23,9 +26,14 @@ pub mod converse;
 pub mod github_connector;
 pub mod http;
 pub mod ide_connector;
+pub mod jira_browser;
 pub mod jira_connector;
+pub mod msgraph;
 pub mod nexus_connector;
+pub mod notification_connector;
 pub mod ollama_provider;
+pub mod outlook_connector;
+pub mod parametric;
 pub mod permission;
 pub mod proactive;
 pub mod reasoning;
@@ -33,7 +41,9 @@ pub mod referent;
 pub mod session;
 pub mod shell;
 pub mod suggestions;
+pub mod system_connector;
 pub mod teams_connector;
+pub mod weather_connector;
 pub mod whatsapp_connector;
 
 use std::time::Instant;
@@ -44,16 +54,20 @@ use serde::Serialize;
 use action::{ActionError, ActionOutcome, ActionRequest, ActionSpec};
 use approval::{ApprovalStore, APPROVAL_TTL};
 use audit::Outcome;
-use connector::{Capabilities, Connector, ConnectorStatus, ExecCtx};
 use browser_connector::BrowserConnector;
+use connector::{Capabilities, Connector, ConnectorStatus, ExecCtx};
 use github_connector::GithubConnector;
 use ide_connector::IdeConnector;
 use jira_connector::JiraConnector;
-use teams_connector::TeamsConnector;
-use whatsapp_connector::WhatsappConnector;
 use nexus_connector::NexusConnector;
+use notification_connector::NotificationConnector;
+use outlook_connector::OutlookConnector;
 use permission::{ConfirmPolicy, Permission};
 use session::{AssistantSession, AssistantState, TurnInput};
+use system_connector::SystemConnector;
+use teams_connector::TeamsConnector;
+use weather_connector::WeatherConnector;
+use whatsapp_connector::WhatsappConnector;
 
 /// NEXUS-013: emitted whenever assistant state changes, so the UI never has
 /// to poll. Mirrors the voice event channel's naming.
@@ -73,7 +87,22 @@ pub fn connectors() -> Vec<&'static dyn Connector> {
         &JiraConnector,
         &TeamsConnector,
         &WhatsappConnector,
+        &WeatherConnector,
+        &SystemConnector,
+        &OutlookConnector,
+        &NotificationConnector,
     ]
+}
+
+/// The connector that owns an action id, if any.
+///
+/// NEXUS-026 needs it to check that a remedy points at something real before
+/// offering it: an offer the user says yes to and that then fails with
+/// "unknown action" is worse than not offering at all.
+pub fn connector_for(action_id: &str) -> Option<&'static dyn Connector> {
+    connectors()
+        .into_iter()
+        .find(|c| c.spec(action_id).is_some())
 }
 
 /// Make sure every connector in the code has a row in the database.
@@ -120,6 +149,12 @@ pub struct ConnectorView {
     /// Levels this connector's actions actually use. Offering a toggle for a
     /// level no action needs invites the user to grant something for nothing.
     pub required_levels: Vec<Permission>,
+    /// The connector's stored configuration: endpoints and account names.
+    ///
+    /// Safe to show: `set_connector_config` refuses any key that looks like
+    /// a secret, so credentials live in the Keychain and never here. Null
+    /// when the connector has never been configured.
+    pub config: serde_json::Value,
 }
 
 pub fn list_connectors(conn: &Connection) -> Result<Vec<ConnectorView>, String> {
@@ -143,9 +178,23 @@ pub fn list_connectors(conn: &Connection) -> Result<Vec<ConnectorView>, String> 
             actions: c.actions().to_vec(),
             granted: permission::granted_levels(conn, c.id())?,
             required_levels: required,
+            config: read_config_json(conn, c.id()),
         });
     }
     Ok(out)
+}
+
+/// A connector's stored configuration, or null when it has none.
+fn read_config_json(conn: &Connection, connector_id: &str) -> serde_json::Value {
+    conn.query_row(
+        "SELECT config_json FROM connectors WHERE connector_id = ?1",
+        [connector_id],
+        |row| row.get::<_, Option<String>>(0),
+    )
+    .ok()
+    .flatten()
+    .and_then(|raw| serde_json::from_str(&raw).ok())
+    .unwrap_or(serde_json::Value::Null)
 }
 
 fn is_enabled(conn: &Connection, connector_id: &str) -> Result<bool, String> {
@@ -178,9 +227,16 @@ pub fn set_connector_config(
     if let Some(object) = config.as_object() {
         for key in object.keys() {
             let lowered = key.to_lowercase();
-            if ["token", "password", "secret", "apikey", "api_key", "credential"]
-                .iter()
-                .any(|banned| lowered.contains(banned))
+            if [
+                "token",
+                "password",
+                "secret",
+                "apikey",
+                "api_key",
+                "credential",
+            ]
+            .iter()
+            .any(|banned| lowered.contains(banned))
             {
                 return Err(format!(
                     "\"{key}\" looks like a secret. Store it in the Keychain, not in NEXUS."
@@ -376,20 +432,73 @@ pub fn execute_action(
                     draft.metadata,
                 );
             }
-            session.advance(AssistantState::Completed, Some(summary.clone()), None);
+            // What the action found, in the connector's own words. Recorded
+            // on the turn too, so the conversation shows the answer rather
+            // than only the intent.
+            let detail = connector.describe_result(spec.id, &output);
+
+            // Whether this action left a question on screen. Set or cleared
+            // on every success, never left standing: an offer that outlived
+            // the action it followed would let a much later "yes" run
+            // something the user had stopped thinking about.
+            match connector
+                .follow_up(spec.id, &input, &output)
+                .and_then(|next| connector.spec(next.action_id).map(|spec| (next, spec)))
+            {
+                Some((next, next_spec)) => session.offer_follow_up(
+                    next_spec.id,
+                    next.input,
+                    &format!(
+                        "Say yes to {}, or no to leave it.",
+                        next_spec.summary.to_lowercase()
+                    ),
+                ),
+                None => session.clear_follow_up(),
+            }
+
+            session.advance(
+                AssistantState::Completed,
+                Some(detail.clone().unwrap_or_else(|| summary.clone())),
+                None,
+            );
             Ok(ActionOutcome {
                 action_id: spec.id.to_string(),
                 output,
                 summary,
+                detail,
                 audit_id,
             })
         }
         Err(error) => {
+            // A failed offer is not still open. Clearing it here means a
+            // "yes" after a failure re-asks rather than silently retrying
+            // something that just did not work.
+            session.clear_follow_up();
+
+            // NEXUS-026. What the user could do about it, if the connector
+            // knows. Offered through the same follow-up mechanism a draft
+            // uses, so "yes" reaches it with no new vocabulary and no new
+            // surface: a fix is offered, never applied.
+            if let Some(remedy) = connector.remedy(spec.id, &error) {
+                if connector_for(remedy.action_id).is_some() {
+                    session.offer_follow_up(
+                        remedy.action_id,
+                        remedy.input.clone(),
+                        &remedy.prompt,
+                    );
+                }
+            }
+            // The reason, not the class. `label()` renders every dispatch
+            // failure as the string "failed", which is already what the
+            // `outcome` column says, so the row carried no information about
+            // what actually went wrong: a missing Accessibility grant and a
+            // focus race were indistinguishable in the trail. Refusals still
+            // record their label, because there the class *is* the reason.
             let _ = audit::finish(
                 conn,
                 audit_id,
                 Outcome::Failed,
-                Some(error.label()),
+                Some(&error.to_string()),
                 elapsed,
             );
             session.advance(
@@ -494,8 +603,13 @@ mod tests {
         let approvals = ApprovalStore::default();
         let session = AssistantSession::default();
         // Deliberately close to a real id. NEXUS must not "help".
-        let err = execute_action(&conn, &approvals, &session, request("nexus.open_setting", json!(null)))
-            .expect_err("must reject");
+        let err = execute_action(
+            &conn,
+            &approvals,
+            &session,
+            request("nexus.open_setting", json!(null)),
+        )
+        .expect_err("must reject");
         assert!(matches!(err, ActionError::UnknownAction { .. }), "{err:?}");
     }
 
@@ -525,13 +639,23 @@ mod tests {
         let approvals = ApprovalStore::default();
         let session = AssistantSession::default();
 
-        execute_action(&conn, &approvals, &session, request("nexus.open_settings", json!(null)))
-            .expect("permitted while granted");
+        execute_action(
+            &conn,
+            &approvals,
+            &session,
+            request("nexus.open_settings", json!(null)),
+        )
+        .expect("permitted while granted");
 
         permission::set_grant(&conn, "nexus", Permission::Interact, false).expect("revoke");
 
-        let err = execute_action(&conn, &approvals, &session, request("nexus.open_settings", json!(null)))
-            .expect_err("must refuse once revoked");
+        let err = execute_action(
+            &conn,
+            &approvals,
+            &session,
+            request("nexus.open_settings", json!(null)),
+        )
+        .expect_err("must refuse once revoked");
         assert!(
             matches!(err, ActionError::NotPermitted { level, .. } if level == Permission::Interact),
             "{err:?}"
@@ -545,9 +669,17 @@ mod tests {
         let session = AssistantSession::default();
         set_connector_enabled(&conn, "nexus", false).expect("disable");
 
-        let err = execute_action(&conn, &approvals, &session, request("nexus.open_overview", json!(null)))
-            .expect_err("must refuse");
-        assert!(matches!(err, ActionError::ConnectorDisabled { .. }), "{err:?}");
+        let err = execute_action(
+            &conn,
+            &approvals,
+            &session,
+            request("nexus.open_overview", json!(null)),
+        )
+        .expect_err("must refuse");
+        assert!(
+            matches!(err, ActionError::ConnectorDisabled { .. }),
+            "{err:?}"
+        );
     }
 
     #[test]
@@ -557,7 +689,12 @@ mod tests {
         let session = AssistantSession::default();
         permission::set_grant(&conn, "nexus", Permission::Interact, false).expect("revoke");
 
-        let _ = execute_action(&conn, &approvals, &session, request("nexus.open_projects", json!(null)));
+        let _ = execute_action(
+            &conn,
+            &approvals,
+            &session,
+            request("nexus.open_projects", json!(null)),
+        );
 
         let rows = audit::list_recent(&conn, 10).expect("audit");
         assert_eq!(rows.len(), 1, "a refusal must be recorded");
@@ -600,8 +737,12 @@ mod tests {
         let project = seed_project(&conn, "Atlas");
         let input = json!({ "projectId": project, "title": "Ship it" });
 
-        let token = match execute_action(&conn, &approvals, &session, request("nexus.create_task", input.clone()))
-        {
+        let token = match execute_action(
+            &conn,
+            &approvals,
+            &session,
+            request("nexus.create_task", input.clone()),
+        ) {
             Err(ActionError::NeedsApproval { token, .. }) => token,
             other => panic!("expected an approval request, got {other:?}"),
         };
@@ -631,8 +772,12 @@ mod tests {
         let task = seed_task(&conn, project, "Ship it");
         let input = json!({ "id": task });
 
-        let token = match execute_action(&conn, &approvals, &session, request("nexus.delete_task", input.clone()))
-        {
+        let token = match execute_action(
+            &conn,
+            &approvals,
+            &session,
+            request("nexus.delete_task", input.clone()),
+        ) {
             Err(ActionError::NeedsApproval { token, .. }) => token,
             other => panic!("expected an approval request, got {other:?}"),
         };
@@ -654,7 +799,10 @@ mod tests {
             },
         )
         .expect_err("a replayed token must not run again");
-        assert!(matches!(replay, ActionError::InvalidApproval { .. }), "{replay:?}");
+        assert!(
+            matches!(replay, ActionError::InvalidApproval { .. }),
+            "{replay:?}"
+        );
     }
 
     #[test]
@@ -689,10 +837,15 @@ mod tests {
             },
         )
         .expect_err("must reject a swapped target");
-        assert!(matches!(err, ActionError::InvalidApproval { .. }), "{err:?}");
+        assert!(
+            matches!(err, ActionError::InvalidApproval { .. }),
+            "{err:?}"
+        );
 
         let still_there: i64 = conn
-            .query_row("SELECT COUNT(*) FROM tasks WHERE id = ?1", [keep], |r| r.get(0))
+            .query_row("SELECT COUNT(*) FROM tasks WHERE id = ?1", [keep], |r| {
+                r.get(0)
+            })
             .expect("count");
         assert_eq!(still_there, 1, "the swapped-in row must survive");
     }
@@ -716,7 +869,10 @@ mod tests {
             },
         )
         .expect_err("must refuse");
-        assert!(matches!(err, ActionError::InvalidApproval { .. }), "{err:?}");
+        assert!(
+            matches!(err, ActionError::InvalidApproval { .. }),
+            "{err:?}"
+        );
 
         let rows = audit::list_recent(&conn, 10).expect("audit");
         assert_eq!(rows[0].outcome, "refused");
@@ -736,7 +892,10 @@ mod tests {
             &conn,
             &approvals,
             &session,
-            request("nexus.create_task", json!({ "projectId": project, "title": "x" })),
+            request(
+                "nexus.create_task",
+                json!({ "projectId": project, "title": "x" }),
+            ),
         );
         assert!(audit::list_recent(&conn, 10).expect("audit").is_empty());
     }
@@ -754,11 +913,18 @@ mod tests {
             &conn,
             &approvals,
             &session,
-            request("nexus.create_task", json!({ "projectId": project, "title": "x" })),
+            request(
+                "nexus.create_task",
+                json!({ "projectId": project, "title": "x" }),
+            ),
         )
         .expect_err("must refuse");
         assert!(matches!(err, ActionError::NotPermitted { .. }), "{err:?}");
-        assert_eq!(approvals.pending_count(), 0, "no prompt should have been issued");
+        assert_eq!(
+            approvals.pending_count(),
+            0,
+            "no prompt should have been issued"
+        );
     }
 
     // -- Interact path --------------------------------------------------------
@@ -768,10 +934,75 @@ mod tests {
         let conn = test_conn();
         let approvals = ApprovalStore::default();
         let session = AssistantSession::default();
-        let outcome = execute_action(&conn, &approvals, &session, request("nexus.open_registry", json!(null)))
-            .expect("no prompt for navigation");
+        let outcome = execute_action(
+            &conn,
+            &approvals,
+            &session,
+            request("nexus.open_registry", json!(null)),
+        )
+        .expect("no prompt for navigation");
         assert_eq!(outcome.output["screen"], "registry");
         assert_eq!(approvals.pending_count(), 0);
+    }
+
+    #[test]
+    fn a_result_is_described_not_just_summarised() {
+        // Defect E: the assistant showed "List open tabs" and discarded the
+        // tabs, so a working action looked like nothing had happened.
+        let conn = test_conn();
+        let approvals = ApprovalStore::default();
+        let session = AssistantSession::default();
+        let project = seed_project(&conn, "Atlas");
+
+        let outcome = execute_action(
+            &conn,
+            &approvals,
+            &session,
+            request("nexus.open_project", json!({ "projectId": project })),
+        )
+        .expect("run");
+
+        // nexus.* navigation has no result worth reading, so it falls back to
+        // the summary rather than inventing detail.
+        assert!(outcome.detail.is_none());
+        assert!(outcome.summary.contains("Atlas"));
+    }
+
+    #[test]
+    fn every_connector_describing_a_result_returns_something_readable() {
+        // A description that is empty or that echoes the raw payload is worse
+        // than none, because the caller would show it instead of the summary.
+        for connector in connectors() {
+            for action_id in connector.zero_input_actions() {
+                if let Some(text) =
+                    connector.describe_result(action_id, &json!({ "unexpected": true }))
+                {
+                    assert!(!text.trim().is_empty(), "{action_id} described nothing");
+                    assert!(!text.contains('{'), "{action_id} leaked raw json");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_turn_records_what_was_found() {
+        // The conversation should show the answer, not only the intent.
+        let conn = test_conn();
+        let approvals = ApprovalStore::default();
+        let session = AssistantSession::default();
+        execute_action(
+            &conn,
+            &approvals,
+            &session,
+            request("nexus.open_overview", json!(null)),
+        )
+        .expect("run");
+
+        let snapshot = session.snapshot(0);
+        assert!(
+            snapshot.turns.last().expect("a turn").summary.is_some(),
+            "the turn must carry what happened"
+        );
     }
 
     #[test]
@@ -779,8 +1010,13 @@ mod tests {
         let conn = test_conn();
         let approvals = ApprovalStore::default();
         let session = AssistantSession::default();
-        execute_action(&conn, &approvals, &session, request("nexus.open_overview", json!(null)))
-            .expect("run");
+        execute_action(
+            &conn,
+            &approvals,
+            &session,
+            request("nexus.open_overview", json!(null)),
+        )
+        .expect("run");
 
         let rows = audit::list_recent(&conn, 10).expect("audit");
         assert_eq!(rows[0].outcome, "succeeded");
@@ -804,7 +1040,14 @@ mod tests {
 
         let rows = audit::list_recent(&conn, 10).expect("audit");
         assert_eq!(rows[0].outcome, "failed");
-        assert_eq!(rows[0].error.as_deref(), Some("invalid-input"));
+        // The reason, not the class. `outcome` already says it failed, so a
+        // label here would repeat that and say nothing about what went
+        // wrong: the trail could not tell a missing permission apart from a
+        // focus race. Refusals keep their labels, where the class *is* the
+        // reason.
+        let reason = rows[0].error.clone().expect("a reason");
+        assert!(reason.contains("malformed"), "{reason}");
+        assert!(reason.contains("not a number"), "{reason}");
     }
 
     // -- Connector view -------------------------------------------------------
@@ -813,7 +1056,10 @@ mod tests {
     fn the_connector_view_offers_only_levels_its_actions_use() {
         let conn = test_conn();
         let views = list_connectors(&conn).expect("list");
-        let nexus = views.iter().find(|v| v.id == "nexus").expect("nexus present");
+        let nexus = views
+            .iter()
+            .find(|v| v.id == "nexus")
+            .expect("nexus present");
 
         assert!(
             !nexus.required_levels.contains(&Permission::Execute),
@@ -905,8 +1151,8 @@ mod tests {
         let conn = test_conn();
         for field in ["token", "apiToken", "password", "clientSecret", "API_KEY"] {
             let config = json!({ "site": "https://x.atlassian.net", field: "hunter2" });
-            let err = set_connector_config(&conn, "jira", &config)
-                .expect_err("must refuse {field}");
+            let err =
+                set_connector_config(&conn, "jira", &config).expect_err("must refuse {field}");
             assert!(err.contains("Keychain"), "{err}");
         }
     }
@@ -1013,7 +1259,13 @@ mod tests {
         // Registration names connectors; behaviour must not. A `match` on
         // "github" here would be the moment the abstraction stopped paying.
         let core = production_source(include_str!("mod.rs"));
-        for id in ["\"github\"", "\"jira\"", "\"teams\"", "\"browser\"", "\"ide\""] {
+        for id in [
+            "\"github\"",
+            "\"jira\"",
+            "\"teams\"",
+            "\"browser\"",
+            "\"ide\"",
+        ] {
             assert!(
                 !core.contains(id),
                 "the core must not test for the connector id {id}"
@@ -1021,3 +1273,6 @@ mod tests {
         }
     }
 }
+
+
+

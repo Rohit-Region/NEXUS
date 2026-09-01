@@ -48,11 +48,31 @@ const fn spec(id: &'static str, summary: &'static str, permission: Permission) -
 }
 
 pub const ACTIONS: &[ActionSpec] = &[
-    spec("github.status", "Check the GitHub connection", Permission::Read),
-    spec("github.list_prs", "List pull requests for a project", Permission::Read),
-    spec("github.read_pr", "Read a pull request and its checks", Permission::Read),
-    spec("github.read_pr_comments", "Read the comments on a pull request", Permission::Read),
-    spec("github.open_pr", "Open a pull request in the browser", Permission::Interact),
+    spec(
+        "github.status",
+        "Check the GitHub connection",
+        Permission::Read,
+    ),
+    spec(
+        "github.list_prs",
+        "List pull requests for a project",
+        Permission::Read,
+    ),
+    spec(
+        "github.read_pr",
+        "Read a pull request and its checks",
+        Permission::Read,
+    ),
+    spec(
+        "github.read_pr_comments",
+        "Read the comments on a pull request",
+        Permission::Read,
+    ),
+    spec(
+        "github.open_pr",
+        "Open a pull request in the browser",
+        Permission::Interact,
+    ),
 ];
 
 #[derive(Debug, Deserialize)]
@@ -206,7 +226,10 @@ struct CheckSummary {
 /// entries is not an answer. Unknown states count as pending rather than
 /// passing, because a check NEXUS does not understand must never read green.
 fn summarise_checks(rollup: Option<&serde_json::Value>) -> CheckSummary {
-    let entries = rollup.and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let entries = rollup
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
     let mut failing_names = Vec::new();
     let mut pending = 0usize;
 
@@ -389,6 +412,66 @@ impl Connector for GithubConnector {
         }
     }
 
+    fn describe_result(&self, action_id: &str, output: &serde_json::Value) -> Option<String> {
+        match action_id {
+            "github.status" => Some(if output.get("signedIn")?.as_bool().unwrap_or(false) {
+                "GitHub is connected.".to_string()
+            } else {
+                "GitHub is not signed in. Run `gh auth login`.".to_string()
+            }),
+            "github.list_prs" => {
+                let prs = output.get("pullRequests")?.as_array()?;
+                if prs.is_empty() {
+                    return Some(format!(
+                        "No open pull requests in {}.",
+                        output.get("repo")?.as_str()?
+                    ));
+                }
+                let listed: Vec<String> = prs
+                    .iter()
+                    .take(5)
+                    .filter_map(|p| {
+                        Some(format!(
+                            "#{} {}",
+                            p.get("number")?.as_i64()?,
+                            p.get("title")?
+                                .as_str()?
+                                .chars()
+                                .take(50)
+                                .collect::<String>()
+                        ))
+                    })
+                    .collect();
+                Some(format!("{} open: {}.", prs.len(), listed.join(", ")))
+            }
+            "github.read_pr" => {
+                let number = output.get("number")?.as_i64()?;
+                let title = output.get("title")?.as_str()?;
+                let checks = output.get("checks")?;
+                let failing = checks.get("failing")?.as_i64().unwrap_or(0);
+                let pending = checks.get("pending")?.as_i64().unwrap_or(0);
+                let verdict = if failing > 0 {
+                    let names: Vec<&str> = checks
+                        .get("failingNames")
+                        .and_then(|v| v.as_array())
+                        .map(|a| a.iter().filter_map(|n| n.as_str()).collect())
+                        .unwrap_or_default();
+                    format!("{failing} failing ({})", names.join(", "))
+                } else if pending > 0 {
+                    format!("{pending} still running")
+                } else {
+                    "all checks passing".to_string()
+                };
+                Some(format!("PR #{number} {title}: {verdict}."))
+            }
+            _ => None,
+        }
+    }
+
+    fn zero_input_actions(&self) -> &'static [&'static str] {
+        &["github.status"]
+    }
+
     fn dispatch(
         &self,
         action_id: &str,
@@ -408,7 +491,13 @@ impl Connector for GithubConnector {
                 let target: ProjectRef = parse(input)?;
                 let (project, repo) = repo_for_project(ctx.conn, target.project_id)?;
                 let value = gh_json(&[
-                    "pr", "list", "--repo", &repo, "--limit", PR_LIMIT, "--json",
+                    "pr",
+                    "list",
+                    "--repo",
+                    &repo,
+                    "--limit",
+                    PR_LIMIT,
+                    "--json",
                     "number,title,state,isDraft,url,author",
                 ])?;
                 json(serde_json::json!({
@@ -423,7 +512,12 @@ impl Connector for GithubConnector {
                 let (_, repo) = repo_for_project(ctx.conn, target.project_id)?;
                 let number = target.number.to_string();
                 let value = gh_json(&[
-                    "pr", "view", &number, "--repo", &repo, "--json",
+                    "pr",
+                    "view",
+                    &number,
+                    "--repo",
+                    &repo,
+                    "--json",
                     "number,title,state,isDraft,url,author,mergeable,statusCheckRollup",
                 ])?;
 
@@ -491,14 +585,18 @@ mod tests {
     #[test]
     fn every_shape_people_actually_paste_is_accepted() {
         for raw in [
-            "https://github.com/avetta/AdminService",
-            "https://github.com/avetta/AdminService.git",
-            "https://github.com/avetta/AdminService/",
-            "git@github.com:avetta/AdminService.git",
-            "ssh://git@github.com/avetta/AdminService",
-            "avetta/AdminService",
+            "https://github.com/acme/AdminService",
+            "https://github.com/acme/AdminService.git",
+            "https://github.com/acme/AdminService/",
+            "git@github.com:acme/AdminService.git",
+            "ssh://git@github.com/acme/AdminService",
+            "acme/AdminService",
         ] {
-            assert_eq!(parse_repo(raw).as_deref(), Some("avetta/AdminService"), "{raw}");
+            assert_eq!(
+                parse_repo(raw).as_deref(),
+                Some("acme/AdminService"),
+                "{raw}"
+            );
         }
     }
 
@@ -506,9 +604,9 @@ mod tests {
     fn another_host_is_refused_rather_than_assumed() {
         // A wrong repository is a wrong answer that looks right.
         for raw in [
-            "https://gitlab.com/avetta/AdminService",
-            "https://bitbucket.org/avetta/AdminService",
-            "git@gitlab.com:avetta/AdminService.git",
+            "https://gitlab.com/acme/AdminService",
+            "https://bitbucket.org/acme/AdminService",
+            "git@gitlab.com:acme/AdminService.git",
         ] {
             assert_eq!(parse_repo(raw), None, "{raw}");
         }

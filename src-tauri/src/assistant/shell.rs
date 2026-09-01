@@ -27,7 +27,15 @@ const POLL: Duration = Duration::from_millis(25);
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Output {
+    /// Standard output as text, trimmed. Right for every caller that reads a
+    /// program's answer, and wrong for one reading a file format.
     pub stdout: String,
+    /// The same bytes, untouched.
+    ///
+    /// Kept because a text-only `Output` is what hid a real defect: a binary
+    /// property list read through `stdout` had already been through
+    /// `from_utf8_lossy` and was rubble by the time anyone looked at it.
+    pub raw_stdout: Vec<u8>,
     pub stderr: String,
     pub success: bool,
 }
@@ -69,6 +77,22 @@ pub fn run_with_stdin(
     stdin_data: &str,
     timeout: Duration,
 ) -> Result<Output, RunError> {
+    run_with_stdin_bytes(program, args, stdin_data.as_bytes(), timeout)
+}
+
+/// The same, for input that is not text.
+///
+/// Needed because a binary property list is not UTF-8, and putting one
+/// through a `&str` means `from_utf8_lossy` first, which replaces every byte
+/// it does not like with U+FFFD and hands the parser rubble. That failure is
+/// silent: the parse returns nothing and the caller sees an empty result
+/// rather than an error.
+pub fn run_with_stdin_bytes(
+    program: &str,
+    args: &[&str],
+    stdin_data: &[u8],
+    timeout: Duration,
+) -> Result<Output, RunError> {
     use std::io::Write;
 
     let mut child = Command::new(program)
@@ -89,7 +113,7 @@ pub fn run_with_stdin(
     if let Some(mut pipe) = child.stdin.take() {
         // A write failure here usually means the child already exited; the
         // wait below surfaces the real reason, so this one is not fatal.
-        let _ = pipe.write_all(stdin_data.as_bytes());
+        let _ = pipe.write_all(stdin_data);
         let _ = pipe.flush();
         drop(pipe);
     }
@@ -133,6 +157,7 @@ fn wait_bounded(
     Ok(Output {
         success: output.status.success(),
         stdout: String::from_utf8_lossy(&output.stdout).trim().to_string(),
+        raw_stdout: output.stdout.clone(),
         stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
     })
 }
@@ -194,8 +219,8 @@ mod tests {
 
     #[test]
     fn a_program_that_does_not_exist_is_reported_as_missing() {
-        let err = run("/usr/bin/definitely-not-a-program", &[], DEFAULT_TIMEOUT)
-            .expect_err("must fail");
+        let err =
+            run("/usr/bin/definitely-not-a-program", &[], DEFAULT_TIMEOUT).expect_err("must fail");
         assert!(matches!(err, RunError::NotFound { .. }), "{err:?}");
         assert!(err.to_string().contains("not installed"));
     }
@@ -211,8 +236,8 @@ mod tests {
     fn a_hanging_program_is_killed_at_the_deadline() {
         // The case that matters: a macOS permission prompt nobody answers.
         let started = Instant::now();
-        let err = run("/bin/sleep", &["30"], Duration::from_millis(300))
-            .expect_err("must time out");
+        let err =
+            run("/bin/sleep", &["30"], Duration::from_millis(300)).expect_err("must time out");
         assert!(matches!(err, RunError::TimedOut { .. }), "{err:?}");
         assert!(
             started.elapsed() < Duration::from_secs(5),

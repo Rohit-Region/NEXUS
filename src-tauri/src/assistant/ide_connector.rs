@@ -11,19 +11,41 @@
 //! finding nothing leaves every other action working, and an editor missing
 //! from the list can still be registered by hand.
 //!
-//! **No shell, ever.** Launching is a fixed argument vector, and there is no
-//! `ide.run_task` in this milestone. Running a build or a test suite means
-//! executing a command, and NEXUS has nowhere to store a vetted one yet.
-//! Shipping it would mean either inventing a command or accepting one from a
-//! caller, and the second is the escape hatch this architecture exists to
-//! avoid.
+//! **No shell, ever.** Launching is a fixed argument vector, and there is
+//! still no `ide.run_task`. Running a build means executing a command, NEXUS
+//! has nowhere vetted to keep one, and shipping it would mean either
+//! inventing a command or accepting one from a caller. The second is the
+//! escape hatch this architecture exists to avoid, and that has not changed.
+//!
+//! **Dictation is a different shape, which is why it is allowed.**
+//! `ide.type_prompt` types what you said into the box you have focused and
+//! stops. `ide.submit_prompt` presses Return, as a separate `Execute` action
+//! with its own confirmation. NEXUS never composes a command, never stores
+//! one, and never decides what the words mean; it moves your sentence to
+//! your editor and the editor decides. The two steps exist so a misheard
+//! sentence is visible on screen before anything acts on it.
+//!
+//! **Which box receives the text is settled by putting the cursor there.**
+//! Electron publishes no `AXFocusedUIElement` unless a screen reader is
+//! running, so NEXUS cannot *read* where focus is. It can *place* it: the
+//! Claude Code extension registers "Claude Code: Focus input", and running
+//! that through the Command Palette is unconditional. The keyboard shortcut
+//! is not -- `Cmd+Escape` is bound to focus *and* blur, chosen by whether a
+//! code editor has focus, so sending it blind closes Claude half the time.
+//!
+//! Where the extension is missing, dictation is refused rather than
+//! attempted. A palette with no matching command stays open, and the user's
+//! sentence would be typed into it; the confirmed Return after that would
+//! run whatever it had matched. That is somebody's spoken words executed as
+//! an editor command, and no amount of confirmation makes it acceptable.
 
 use rusqlite::Connection;
 use serde::Deserialize;
 
 use super::action::{ActionError, ActionSpec};
 use super::connector::{
-    Capabilities, Connector, ConnectorStatus, ExecCtx, ReferentDraft, UnavailableAction,
+    Capabilities, Connector, ConnectorStatus, ExecCtx, FollowUp, ReferentDraft, Remedy,
+    UnavailableAction,
 };
 use super::permission::{ConfirmPolicy, Permission, Reach};
 use super::referent::ReferentKind;
@@ -66,11 +88,7 @@ const KNOWN_IDES: &[(&str, &str, &str)] = &[
     ),
 ];
 
-const fn spec(
-    id: &'static str,
-    summary: &'static str,
-    permission: Permission,
-) -> ActionSpec {
+const fn spec(id: &'static str, summary: &'static str, permission: Permission) -> ActionSpec {
     ActionSpec {
         id,
         connector_id: CONNECTOR_ID,
@@ -83,13 +101,141 @@ const fn spec(
 }
 
 pub const ACTIONS: &[ActionSpec] = &[
-    spec("ide.discover", "Find editors installed on this Mac", Permission::Read),
-    spec("ide.list", "List the editors you have registered", Permission::Read),
-    spec("ide.status", "Check whether an editor is running", Permission::Read),
-    spec("ide.open_project", "Open a project in an editor", Permission::Interact),
-    spec("ide.open_file", "Open a file in an editor", Permission::Interact),
-    spec("ide.focus", "Bring an editor to the front", Permission::Interact),
+    spec(
+        "ide.discover",
+        "Find editors installed on this Mac",
+        Permission::Read,
+    ),
+    spec(
+        "ide.list",
+        "List the editors you have registered",
+        Permission::Read,
+    ),
+    spec(
+        "ide.status",
+        "Check whether an editor is running",
+        Permission::Read,
+    ),
+    spec(
+        "ide.open_project",
+        "Open a project in an editor",
+        Permission::Interact,
+    ),
+    spec(
+        "ide.open_file",
+        "Open a file in an editor",
+        Permission::Interact,
+    ),
+    spec(
+        "ide.focus",
+        "Bring an editor to the front",
+        Permission::Interact,
+    ),
+    ActionSpec {
+        // Dictating into an editor. Types and stops: the text lands in
+        // whatever box has focus and nothing runs until `ide.submit_prompt`
+        // is confirmed separately, which is what makes a misheard sentence
+        // recoverable by looking at it.
+        id: "ide.type_prompt",
+        connector_id: CONNECTOR_ID,
+        // Names Claude, which it may now do: the action focuses Claude's
+        // prompt box itself rather than typing into whatever happened to
+        // have focus, and refuses outright where it cannot find it.
+        summary: "Type a prompt into Claude in an editor",
+        permission: Permission::Write,
+        confirm: ConfirmPolicy::Always,
+        reach: Reach::LocalOnly,
+        // The text is on screen and can be cleared by hand.
+        reversible: true,
+    },
+    ActionSpec {
+        id: "ide.submit_prompt",
+        connector_id: CONNECTOR_ID,
+        summary: "Run what is typed in the editor",
+        // `Execute` rather than `Write`, and the distinction is the whole
+        // point of splitting this in two: typing puts characters on screen,
+        // pressing Return hands them to something that acts on them.
+        permission: Permission::Execute,
+        confirm: ConfirmPolicy::Always,
+        reach: Reach::LocalOnly,
+        // Whatever it starts is already started.
+        reversible: false,
+    },
 ];
+
+/// The command the Claude Code extension registers for putting the cursor in
+/// its prompt box, exactly as it appears in the Command Palette.
+///
+/// **The palette rather than the keyboard shortcut, and the reason matters.**
+/// The extension binds `Cmd+Escape` to *two* commands: `claude-vscode.focus`
+/// when a code editor has focus, and `claude-vscode.blur` when it does not.
+/// Sending that key blind is a coin flip that closes Claude as often as it
+/// opens it. Running the command by name carries no such condition.
+const CLAUDE_FOCUS_COMMAND: &str = "Claude Code: Focus input";
+
+/// The command that starts a fresh conversation.
+///
+/// Also palette-only, and for a second reason on top of the first: its
+/// `Cmd+N` binding is gated on `claudeCode.enableNewConversationShortcut`,
+/// which ships **off**. The shortcut is therefore dead on a default install,
+/// while the command itself carries no condition at all.
+const CLAUDE_NEW_CHAT_COMMAND: &str = "Claude Code: New Conversation";
+
+/// How long the Command Palette is given to open, filter, and close.
+///
+/// Generous on purpose. Every one of these is a race NEXUS cannot observe
+/// the result of: Electron publishes no accessibility tree, so a palette
+/// that had not finished filtering when Return arrived would run whichever
+/// command was highlighted at that moment. Waiting is the only instrument
+/// available, so it is set well past what the editor needs rather than at
+/// the edge of it.
+const PALETTE_SETTLE: &str = "delay 0.7";
+const COMMAND_SETTLE: &str = "delay 1.0";
+
+/// Where each editor keeps its extensions, so NEXUS can tell whether Claude
+/// Code is actually installed there.
+///
+/// **This check is load-bearing, not a nicety.** Without it, an editor
+/// without the extension leaves the Command Palette open with no match, and
+/// the dictated sentence is typed into the palette instead of into Claude.
+/// The next confirmed Return would then run whatever the palette had matched
+/// by then, which is somebody's spoken words executed as an editor command.
+/// Refusing early is the only honest option.
+///
+/// Keyed by process name, which is what the bundle resolves to. An editor
+/// absent from this list is not refused for being unknown; it simply has no
+/// known place to look.
+const EXTENSION_DIRS: &[(&str, &str)] = &[("Code", ".vscode"), ("Cursor", ".cursor")];
+
+/// Whether the Claude Code extension is installed for this editor.
+///
+/// `None` means NEXUS has no way to tell for that editor, which is different
+/// from `Some(false)` and is treated differently by the caller.
+fn claude_installed(process: &str) -> Option<bool> {
+    let dir = EXTENSION_DIRS
+        .iter()
+        .find(|(name, _)| *name == process)
+        .map(|(_, dir)| *dir)?;
+    let home = std::env::var("HOME").ok()?;
+    let extensions = std::path::Path::new(&home).join(dir).join("extensions");
+    Some(
+        std::fs::read_dir(extensions)
+            .map(|entries| {
+                entries.filter_map(|e| e.ok()).any(|e| {
+                    e.file_name()
+                        .to_string_lossy()
+                        .starts_with("anthropic.claude-code")
+                })
+            })
+            .unwrap_or(false),
+    )
+}
+
+/// Longest dictated prompt NEXUS will type.
+///
+/// Synthetic typing is slow and cannot be interrupted once it starts, so an
+/// accidental paragraph is a wait the user cannot escape.
+const MAX_PROMPT: usize = 2_000;
 
 // -- Typed inputs -------------------------------------------------------------
 
@@ -97,6 +243,13 @@ pub const ACTIONS: &[ActionSpec] = &[
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct IdeRef {
     ide_id: i64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TypePrompt {
+    ide_id: i64,
+    text: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -149,12 +302,15 @@ fn resolve_ide(conn: &Connection, ide_id: i64) -> Result<ResolvedIde, ActionErro
         });
     }
 
-    let executable = entry.executable_path.clone().ok_or_else(|| ActionError::Failed {
-        detail: format!(
-            "{} has no executable path. Add one in the Registry so NEXUS knows what to launch.",
-            entry.name
-        ),
-    })?;
+    let executable = entry
+        .executable_path
+        .clone()
+        .ok_or_else(|| ActionError::Failed {
+            detail: format!(
+                "{} has no executable path. Add one in the Registry so NEXUS knows what to launch.",
+                entry.name
+            ),
+        })?;
 
     if !std::path::Path::new(&executable).exists() {
         return Err(ActionError::Failed {
@@ -256,6 +412,161 @@ fn launch(ide: &ResolvedIde, target: &str, line: Option<u32>) -> Result<(), Acti
 
 /// Whether a process with this name is running.
 ///
+/// The name the running process actually has, read from the bundle.
+///
+/// **Not the bundle's own name, which is what this used to guess.** The
+/// bundle is "Visual Studio Code.app" and the process is `Code`; IntelliJ's
+/// is `idea`. Deriving the process name from the folder therefore reported
+/// VS Code as not running while it was plainly open, and any check built on
+/// that comparison was answering about a process that does not exist.
+///
+/// `CFBundleExecutable` is the authoritative answer, it is what macOS itself
+/// uses, and it matches both `pgrep` and the name System Events reports for
+/// the frontmost process. Falling back to the bundle name keeps the old
+/// behaviour for anything without a readable plist rather than failing.
+fn process_name(executable: &str) -> String {
+    let bundle = executable
+        .split("/Contents/")
+        .next()
+        .unwrap_or(executable)
+        .to_string();
+
+    let plist = format!("{bundle}/Contents/Info.plist");
+    if let Ok(out) = run(
+        "/usr/bin/defaults",
+        &["read", &plist, "CFBundleExecutable"],
+        DEFAULT_TIMEOUT,
+    ) {
+        if out.success && !out.stdout.trim().is_empty() {
+            return out.stdout.trim().to_string();
+        }
+    }
+
+    bundle
+        .rsplit('/')
+        .next()
+        .map(|app| app.trim_end_matches(".app").to_string())
+        .unwrap_or_else(|| bundle.clone())
+}
+
+/// Registered editors that are actually open, in registry order.
+///
+/// The resolver needs this because dictation has to land in a specific
+/// editor and NEXUS will not guess between two that are both running. With
+/// one open the answer is obvious; with several the user is asked. Uses
+/// `pgrep`, so checking cannot raise an Automation prompt.
+pub fn running_editors(conn: &Connection) -> Vec<(i64, String)> {
+    list_ides(conn, true)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|entry| {
+            let executable = entry.executable_path?;
+            is_running(&process_name(&executable)).then_some((entry.id, entry.name))
+        })
+        .collect()
+}
+
+/// A prompt worth typing.
+///
+/// Empty is rejected rather than typed as nothing: an empty dictation is a
+/// microphone that heard silence, and confirming "type nothing" wastes the
+/// user's confirmation on a no-op.
+fn check_prompt(raw: &str) -> Result<String, ActionError> {
+    let text = raw.trim();
+    if text.is_empty() {
+        return Err(ActionError::InvalidInput {
+            detail: "There was nothing to type.".to_string(),
+        });
+    }
+    if text.chars().count() > MAX_PROMPT {
+        return Err(ActionError::InvalidInput {
+            detail: format!("That prompt is longer than {MAX_PROMPT} characters."),
+        });
+    }
+    Ok(text.to_string())
+}
+
+/// Raise an editor, confirm it is really in front, and act on it.
+///
+/// **What this can and cannot promise, stated plainly, because the gap
+/// matters to whoever is dictating into it.**
+///
+/// It *can* guarantee the keystrokes reach the editor you named. The
+/// activation, the frontmost check and the keystrokes are one script, so no
+/// other window can take focus between the check and the typing and collect
+/// the text instead. That is the same lesson the WhatsApp connector learned
+/// the expensive way.
+///
+/// It *cannot* guarantee which box inside that editor receives them. VS Code
+/// and Cursor are Electron applications and publish no `AXFocusedUIElement`
+/// unless a screen reader is running, so there is no supported way to see
+/// whether the Claude panel, the file, or the find bar has focus. NEXUS types
+/// into whatever you focused, exactly as `browser.type_here` does, and the
+/// action's summary says so rather than naming a panel it cannot find.
+///
+/// The text is passed as an argument, never interpolated into the script.
+/// A dictated sentence containing a quote would otherwise close the string
+/// and the rest would be read as AppleScript.
+fn drive_editor(executable: &str, lines: &[&str], args: &[&str]) -> Result<(), ActionError> {
+    let process = process_name(executable);
+    let process = process.as_str();
+    let mut script = vec![
+        "tell application \"System Events\"",
+        "set n to name of first application process whose frontmost is true",
+        "if n is not (item 1 of argv) then return \"not-front:\" & n",
+    ];
+    script.extend_from_slice(lines);
+    script.push("end tell");
+    script.push("return \"done\"");
+
+    let mut argv = vec![process];
+    argv.extend_from_slice(args);
+
+    // Raising the window is a separate, ordinary launch rather than part of
+    // the script: `open -a` is what `ide.focus` already uses, it needs no
+    // Automation permission, and it works for an application that is not
+    // running yet. The bundle comes from the registry row, so it is a path
+    // already on disk rather than anything a caller supplied.
+    let bundle = executable
+        .split("/Contents/")
+        .next()
+        .unwrap_or(executable)
+        .to_string();
+    let _ = run("/usr/bin/open", &["-a", &bundle], DEFAULT_TIMEOUT);
+    // Raising a window is not instant. Without the wait the frontmost check
+    // reads the application on its way out and refuses a keystroke that
+    // would have been fine a moment later.
+    let _ = run("/bin/sleep", &["0.4"], DEFAULT_TIMEOUT);
+
+    let out = crate::assistant::shell::osascript(&script, &argv).map_err(|e| {
+        ActionError::Failed {
+            detail: format!("Could not reach the editor: {e}"),
+        }
+    })?;
+
+    if !out.success {
+        let detail = if out.stderr.contains("not allowed") || out.stderr.contains("1002") {
+            "NEXUS is not allowed to send keystrokes. Turn it on in System Settings \
+             > Privacy & Security > Accessibility, then try again."
+                .to_string()
+        } else {
+            format!("The editor refused: {}", out.stderr.trim())
+        };
+        return Err(ActionError::Failed { detail });
+    }
+
+    match out.stdout.trim() {
+        "done" => Ok(()),
+        other => Err(ActionError::Failed {
+            detail: format!(
+                "{} was in front instead of the editor, so nothing was typed. \
+                 Bring the editor to the front and say it again.",
+                other.strip_prefix("not-front:").unwrap_or(other)
+            ),
+        }),
+    }
+}
+
 /// `pgrep` rather than AppleScript: it needs no Automation permission, so
 /// checking whether an editor is open cannot raise a prompt.
 fn is_running(name: &str) -> bool {
@@ -345,8 +656,7 @@ impl Connector for IdeConnector {
         // Discovery and listing still work with nothing registered; that is
         // precisely how the user finds out what to register.
         let reason =
-            "No editor is registered yet. Run discovery, then add one in the Registry."
-                .to_string();
+            "No editor is registered yet. Run discovery, then add one in the Registry.".to_string();
         Capabilities {
             available: vec!["ide.discover".to_string(), "ide.list".to_string()],
             unavailable: ACTIONS
@@ -362,9 +672,7 @@ impl Connector for IdeConnector {
 
     fn status(&self, conn: &Connection) -> ConnectorStatus {
         match list_ides(conn, true) {
-            Ok(rows) if rows.iter().any(|e| e.executable_path.is_some()) => {
-                ConnectorStatus::Ready
-            }
+            Ok(rows) if rows.iter().any(|e| e.executable_path.is_some()) => ConnectorStatus::Ready,
             // Not `Unavailable`: discovery works, and that is the way out.
             _ => ConnectorStatus::Degraded,
         }
@@ -399,6 +707,26 @@ impl Connector for IdeConnector {
                     }
                 }
                 Err(_) => "Open a file in an editor".to_string(),
+            },
+            "ide.type_prompt" => match serde_json::from_value::<TypePrompt>(input.clone()) {
+                Ok(t) => {
+                    let ide = ide_name(t.ide_id).unwrap_or_else(|| "an editor".to_string());
+                    // The text itself, because this is the last point at
+                    // which a misheard sentence can be caught, and a summary
+                    // that hid it would make the confirmation worthless.
+                    format!(
+                        "Type into Claude in {ide}: \"{}\"",
+                        t.text.trim().chars().take(140).collect::<String>()
+                    )
+                }
+                Err(_) => "Type into an editor".to_string(),
+            },
+            "ide.submit_prompt" => match serde_json::from_value::<IdeRef>(input.clone())
+                .ok()
+                .and_then(|r| ide_name(r.ide_id))
+            {
+                Some(ide) => format!("Run what is typed in {ide}"),
+                None => "Run what is typed in the editor".to_string(),
             },
             "ide.focus" | "ide.status" => match serde_json::from_value::<IdeRef>(input.clone())
                 .ok()
@@ -454,9 +782,117 @@ impl Connector for IdeConnector {
         match action_id {
             "ide.open_project" => parse::<OpenProject>(input.clone()).map(|_| ()),
             "ide.open_file" => parse::<OpenFile>(input.clone()).map(|_| ()),
-            "ide.focus" | "ide.status" => parse::<IdeRef>(input.clone()).map(|_| ()),
+            "ide.focus" | "ide.status" | "ide.submit_prompt" => {
+                parse::<IdeRef>(input.clone()).map(|_| ())
+            }
+            "ide.type_prompt" => {
+                let target = parse::<TypePrompt>(input.clone())?;
+                check_prompt(&target.text).map(|_| ())
+            }
             _ => Ok(()),
         }
+    }
+
+    fn describe_result(&self, action_id: &str, output: &serde_json::Value) -> Option<String> {
+        match action_id {
+            "ide.discover" => {
+                let found = output.get("found")?.as_array()?;
+                if found.is_empty() {
+                    return Some("No editors found in Applications.".to_string());
+                }
+                let names: Vec<String> = found
+                    .iter()
+                    .filter_map(|e| {
+                        let name = e.get("name")?.as_str()?;
+                        let registered = e.get("registered")?.as_bool().unwrap_or(false);
+                        Some(if registered {
+                            format!("{name} (registered)")
+                        } else {
+                            name.to_string()
+                        })
+                    })
+                    .collect();
+                Some(format!("Found {}.", names.join(", ")))
+            }
+            "ide.list" => {
+                let ides = output.get("ides")?.as_array()?;
+                if ides.is_empty() {
+                    return Some("No editors are registered yet.".to_string());
+                }
+                let names: Vec<&str> = ides
+                    .iter()
+                    .filter_map(|e| e.get("name").and_then(|v| v.as_str()))
+                    .collect();
+                Some(format!("Registered: {}.", names.join(", ")))
+            }
+            "ide.open_project" => Some(format!(
+                "Opened {} in {}.",
+                output.get("project")?.as_str()?,
+                output.get("ide")?.as_str()?
+            )),
+            "ide.status" => Some(format!(
+                "{} is {}.",
+                output.get("name")?.as_str()?,
+                if output.get("running")?.as_bool().unwrap_or(false) {
+                    "running"
+                } else {
+                    "not running"
+                }
+            )),
+            _ => None,
+        }
+    }
+
+    fn zero_input_actions(&self) -> &'static [&'static str] {
+        // `type_prompt` is absent because it needs the text, and
+        // `submit_prompt` because it needs to know which editor: matching
+        // either from a bare phrase and then failing on a missing field is
+        // worse than not matching it. `submit_prompt` is reached through the
+        // follow-up below, which supplies neither, so it is offered only
+        // where the editor is already known.
+        &["ide.discover", "ide.list"]
+    }
+
+    /// Text sitting in an editor is a question, and "yes" is an answer to it.
+    ///
+    /// This is what makes dictation two steps rather than one: the sentence
+    /// lands on screen where it can be read, and nothing runs until the user
+    /// looks at it and agrees.
+    /// The Accessibility grant, which is the only failure here with a fix
+    /// NEXUS can point at. A network problem or a chat that moved has no
+    /// remedy worth offering, and offering one anyway spends the user's
+    /// attention on something that will not work.
+    fn remedy(&self, _action_id: &str, error: &ActionError) -> Option<Remedy> {
+        let detail = match error {
+            ActionError::Failed { detail } => detail,
+            _ => return None,
+        };
+        detail.contains("not allowed to send keystrokes").then(|| Remedy {
+            prompt: "NEXUS is not allowed to send keystrokes. Shall I open \
+                     Accessibility settings?"
+                .to_string(),
+            action_id: "system.open_settings_pane",
+            input: serde_json::json!({ "pane": "accessibility" }),
+        })
+    }
+
+    fn follow_up(
+        &self,
+        action_id: &str,
+        input: &serde_json::Value,
+        _output: &serde_json::Value,
+    ) -> Option<FollowUp> {
+        if action_id != "ide.type_prompt" {
+            return None;
+        }
+        // The same editor the text went into, taken from the action that
+        // just ran. Not from whoever says "yes", and not from whatever
+        // happens to be in front by then.
+        let typed: TypePrompt = serde_json::from_value(input.clone()).ok()?;
+        Some(FollowUp {
+            action_id: "ide.submit_prompt",
+            input: serde_json::json!({ "ideId": typed.ide_id }),
+        })
     }
 
     fn dispatch(
@@ -469,25 +905,17 @@ impl Connector for IdeConnector {
             "ide.discover" => json(serde_json::json!({ "found": discover(ctx.conn) })),
 
             "ide.list" => {
-                let rows = list_ides(ctx.conn, false)
-                    .map_err(|detail| ActionError::Failed { detail })?;
+                let rows =
+                    list_ides(ctx.conn, false).map_err(|detail| ActionError::Failed { detail })?;
                 json(serde_json::json!({ "ides": rows }))
             }
 
             "ide.status" => {
                 let target: IdeRef = parse(input)?;
                 let ide = resolve_ide(ctx.conn, target.ide_id)?;
-                // The process name is the bundle name, not the launcher's.
-                let process = ide
-                    .executable
-                    .split("/Contents/")
-                    .next()
-                    .and_then(|app| app.rsplit('/').next())
-                    .map(|app| app.trim_end_matches(".app").to_string())
-                    .unwrap_or_else(|| ide.name.clone());
                 json(serde_json::json!({
                     "name": ide.name,
-                    "running": is_running(&process)
+                    "running": is_running(&process_name(&ide.executable))
                 }))
             }
 
@@ -511,6 +939,96 @@ impl Connector for IdeConnector {
                     });
                 }
                 json(serde_json::json!({ "focused": ide.name }))
+            }
+
+            "ide.type_prompt" => {
+                let target: TypePrompt = parse(input)?;
+                let ide = resolve_ide(ctx.conn, target.ide_id)?;
+                let text = check_prompt(&target.text)?;
+                let process = process_name(&ide.executable);
+
+                match claude_installed(&process) {
+                    Some(true) => {}
+                    Some(false) => {
+                        return Err(ActionError::Failed {
+                            detail: format!(
+                                "Claude Code is not installed in {}. Install the \
+                                 extension there, or dictate into an editor that \
+                                 has it.",
+                                ide.name
+                            ),
+                        })
+                    }
+                    None => {
+                        return Err(ActionError::Failed {
+                            detail: format!(
+                                "NEXUS does not know where {} keeps its extensions, \
+                                 so it cannot find Claude's prompt box. Only VS Code \
+                                 and Cursor are supported for dictation.",
+                                ide.name
+                            ),
+                        })
+                    }
+                }
+
+                // Focus first, then type. Two things NEXUS could not promise
+                // an hour ago it can promise now: the text goes to Claude
+                // rather than to whatever box happened to have focus, and
+                // the palette is closed again before a single character of
+                // the user's sentence is typed.
+                //
+                // `keystroke` rather than a paste, throughout: the clipboard
+                // belongs to the user, and an assistant that silently
+                // replaces what is on it loses them something they may still
+                // need.
+                drive_editor(
+                    &ide.executable,
+                    &[
+                        // Escape first, so a palette or dialog somebody left
+                        // open does not swallow the sequence below.
+                        "key code 53",
+                        "delay 0.3",
+                        // 1. A fresh conversation. Opens Claude if it is not
+                        //    already open, which is why there is no separate
+                        //    step for that.
+                        "key code 35 using {command down, shift down}",
+                        PALETTE_SETTLE,
+                        "keystroke (item 2 of argv)",
+                        PALETTE_SETTLE,
+                        "key code 36",
+                        COMMAND_SETTLE,
+                        // 2. Put the cursor in the box. Belt and braces: a
+                        //    new conversation usually focuses its own input,
+                        //    but "usually" is not something to type
+                        //    somebody's sentence into.
+                        "key code 35 using {command down, shift down}",
+                        PALETTE_SETTLE,
+                        "keystroke (item 3 of argv)",
+                        PALETTE_SETTLE,
+                        "key code 36",
+                        COMMAND_SETTLE,
+                        // 3. Only now the user's words.
+                        "keystroke (item 4 of argv)",
+                    ],
+                    &[CLAUDE_NEW_CHAT_COMMAND, CLAUDE_FOCUS_COMMAND, &text],
+                )?;
+
+                json(serde_json::json!({
+                    "typed": text,
+                    "into": ide.name,
+                    // NEXUS did not run this. Saying so in the payload keeps
+                    // every caller honest about what happened.
+                    "submitted": false
+                }))
+            }
+
+            "ide.submit_prompt" => {
+                let target: IdeRef = parse(input)?;
+                let ide = resolve_ide(ctx.conn, target.ide_id)?;
+                // Return rather than a click: finding a send button needs the
+                // accessibility tree, which these editors do not publish.
+                drive_editor(&ide.executable, &["key code 36"], &[])?;
+                json(serde_json::json!({ "submitted": true, "in": ide.name }))
             }
 
             "ide.open_project" => {
@@ -608,7 +1126,12 @@ mod tests {
         // The exact state this machine is in: registry rows pointing at
         // paths that do not exist.
         let conn = test_conn();
-        let id = seed_ide(&conn, "UI-TEST-IDE", Some("/Applications/NotReal.app"), true);
+        let id = seed_ide(
+            &conn,
+            "UI-TEST-IDE",
+            Some("/Applications/NotReal.app"),
+            true,
+        );
         let err = resolve_ide(&conn, id).expect_err("must fail");
         assert!(format!("{err:?}").contains("nothing is there"), "{err:?}");
     }
@@ -637,7 +1160,10 @@ mod tests {
     #[test]
     fn a_file_offered_as_a_project_folder_is_refused() {
         let err = checked_path("/bin/echo", true).expect_err("must refuse");
-        assert!(format!("{err:?}").contains("not a project folder"), "{err:?}");
+        assert!(
+            format!("{err:?}").contains("not a project folder"),
+            "{err:?}"
+        );
     }
 
     #[test]
@@ -683,7 +1209,10 @@ mod tests {
         let conn = test_conn();
         let found = discover(&conn);
         if let Some(first) = found.first() {
-            assert!(!first.registered, "nothing is registered in a fresh database");
+            assert!(
+                !first.registered,
+                "nothing is registered in a fresh database"
+            );
             seed_ide(&conn, &first.name, Some(&first.executable_path), true);
             let again = discover(&conn);
             assert!(
@@ -700,7 +1229,9 @@ mod tests {
         assert!(caps.available.contains(&"ide.discover".to_string()));
         assert!(caps.available.contains(&"ide.list".to_string()));
         assert!(
-            caps.unavailable.iter().any(|u| u.action_id == "ide.open_project"),
+            caps.unavailable
+                .iter()
+                .any(|u| u.action_id == "ide.open_project"),
             "opening needs an editor, and the reason should say so"
         );
     }
@@ -717,21 +1248,154 @@ mod tests {
     // -- Registry consistency -------------------------------------------------
 
     #[test]
-    fn no_action_runs_a_command() {
-        // The rule: launching an editor is not the same as running a build,
-        // and NEXUS has nowhere vetted to keep a build command yet.
+    fn no_action_takes_a_command_to_run() {
+        // The rule has not moved, only what satisfies it. NEXUS still has
+        // nowhere vetted to keep a build command, so it still refuses to
+        // accept one: `ide.run_task` would mean taking a command string from
+        // a caller, which is the escape hatch this architecture exists to
+        // avoid.
+        //
+        // Dictation is a different shape and that is why it is allowed. The
+        // text goes on screen, the user reads it, and Return is a second
+        // confirmed action. NEXUS never composes a command, never stores
+        // one, and never decides what the typed words mean; the editor does.
         assert!(
             !ACTIONS.iter().any(|s| s.id == "ide.run_task"),
             "ide.run_task must not ship without somewhere to configure it"
         );
+
         for spec in ACTIONS {
-            assert_ne!(
-                spec.permission,
-                Permission::Execute,
-                "{} must not be Execute in this milestone",
-                spec.id
+            if spec.permission == Permission::Execute {
+                assert_eq!(
+                    spec.id, "ide.submit_prompt",
+                    "the only Execute here presses Return on text already on \
+                     screen; anything else must justify itself"
+                );
+                assert_eq!(spec.confirm, ConfirmPolicy::Always);
+                assert!(!spec.reversible, "whatever it starts is already started");
+            }
+        }
+    }
+
+    #[test]
+    fn typing_and_running_are_separate_confirmed_steps() {
+        // The property that makes dictation recoverable: a misheard sentence
+        // is visible on screen before anything acts on it. Collapsing these
+        // into one action would remove the only moment the user can catch it.
+        let typing = ACTIONS
+            .iter()
+            .find(|s| s.id == "ide.type_prompt")
+            .expect("typing must exist");
+        let running = ACTIONS
+            .iter()
+            .find(|s| s.id == "ide.submit_prompt")
+            .expect("running must exist");
+
+        assert_eq!(typing.permission, Permission::Write);
+        assert_eq!(running.permission, Permission::Execute);
+        assert_eq!(typing.confirm, ConfirmPolicy::Always);
+        assert_eq!(running.confirm, ConfirmPolicy::Always);
+        assert!(typing.reversible, "typed text can be cleared by hand");
+        assert!(!running.reversible);
+
+        // And the second step is offered by the first, so "yes" reaches it
+        // without the user having to name the editor twice.
+        let offer = IdeConnector
+            .follow_up(
+                "ide.type_prompt",
+                &serde_json::json!({ "ideId": 7, "text": "run the tests" }),
+                &serde_json::Value::Null,
+            )
+            .expect("typing must offer the run that follows it");
+        assert_eq!(offer.action_id, "ide.submit_prompt");
+        assert_eq!(
+            offer.input,
+            serde_json::json!({ "ideId": 7 }),
+            "the follow-up must target the editor the text went into, not \
+             whatever happens to be in front when the user says yes"
+        );
+    }
+
+    #[test]
+    fn dictation_focuses_claude_before_it_types_anything() {
+        // The ordering is the safety property. Typing first and focusing
+        // afterwards would put the user's sentence wherever the cursor
+        // happened to be, which for an editor is somebody's source file.
+        let production = include_str!("ide_connector.rs")
+            .split_once("#[cfg(test)]")
+            .map(|(before, _)| before)
+            .expect("the file must keep its test module marker");
+        // The dispatch arm, not the validation arm that shares its name:
+        // `rfind` takes the last, which is the one that does the work.
+        let at = production
+            .rfind("\"ide.type_prompt\" => {")
+            .expect("the dictation arm must exist");
+        let dictation = production[at..]
+            .split_once("\"ide.submit_prompt\" => {")
+            .map(|(body, _)| body)
+            .expect("the dictation arm must be followed by the submit arm");
+
+        let new_chat = dictation
+            .find("item 2 of argv")
+            .expect("a fresh conversation must be opened");
+        let focus = dictation
+            .find("item 3 of argv")
+            .expect("the focus command must be typed into the palette");
+        let types = dictation
+            .find("item 4 of argv")
+            .expect("the prompt must be typed");
+        assert!(new_chat < focus, "open the chat before focusing its box");
+        assert!(focus < types, "focus Claude before typing the sentence");
+
+        // And each palette is dismissed by running its command, not left
+        // open for a later Return to act on.
+        assert!(
+            dictation.matches("key code 36").count() >= 2,
+            "both palette commands must actually be run"
+        );
+    }
+
+    #[test]
+    fn an_editor_without_claude_is_refused_rather_than_typed_into() {
+        // A palette with no matching command stays open, and the sentence
+        // would land in it. NEXUS must not start the sequence at all.
+        assert_eq!(claude_installed("Terminal"), None, "unknown editor");
+        assert!(
+            EXTENSION_DIRS.iter().any(|(name, _)| *name == "Code"),
+            "VS Code must be resolvable, or dictation refuses on this Mac"
+        );
+        assert!(EXTENSION_DIRS.iter().any(|(name, _)| *name == "Cursor"));
+    }
+
+    #[test]
+    fn a_dictated_prompt_is_never_interpolated_into_the_script() {
+        // A sentence containing a quote would otherwise close the AppleScript
+        // string and the remainder would be read as code. The text travels as
+        // an argument, so the script itself is fixed.
+        let production = include_str!("ide_connector.rs")
+            .split_once("#[cfg(test)]")
+            .map(|(before, _)| before)
+            .expect("the file must keep its test module marker");
+        assert!(
+            production.contains("keystroke (item 4 of argv)"),
+            "the typed text must reach AppleScript as an argument"
+        );
+        assert!(
+            !production.contains("keystroke \\\"{"),
+            "no formatted string may become part of the script"
+        );
+    }
+
+    #[test]
+    fn an_empty_dictation_is_refused_rather_than_typed() {
+        for empty in ["", "   ", "\n"] {
+            assert!(
+                check_prompt(empty).is_err(),
+                "a microphone that heard silence must not spend a confirmation"
             );
         }
+        assert_eq!(check_prompt("  run the tests  ").unwrap(), "run the tests");
+        assert!(check_prompt(&"x".repeat(MAX_PROMPT + 1)).is_err());
     }
 
     #[test]
@@ -754,7 +1418,10 @@ mod tests {
             .map(|(before, _)| before)
             .expect("marker");
         for named in ["IntelliJ", "Visual Studio Code", "Cursor", "PyCharm"] {
-            assert!(!core.contains(named), "the core must not know about {named}");
+            assert!(
+                !core.contains(named),
+                "the core must not know about {named}"
+            );
         }
     }
 

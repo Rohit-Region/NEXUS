@@ -1,0 +1,291 @@
+.reminders {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.reminders__error {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-accent);
+  margin: 0;
+}
+
+.reminders__row {
+  display: grid;
+  grid-template-columns: 74px 1fr auto 20px;
+  align-items: center;
+  gap: var(--space-md);
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  /* A rail on the leading edge, coloured by phase. The row's state is
+     readable before any of its text is. */
+  border-left: 2px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm) var(--space-md);
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.reminders__row--scheduled {
+  border-left-color: var(--color-text-muted);
+}
+
+.reminders__row--imminent {
+  border-left-color: var(--color-accent);
+  background-color: var(--color-bg-tertiary);
+}
+
+.reminders__row--due {
+  border-left-color: var(--color-accent);
+  border-color: var(--color-accent-dim);
+}
+
+/* Untimed is a fault, not a state: it will never fire and the user has to
+   notice that without being told twice. */
+.reminders__row--untimed {
+  border-left-color: var(--color-accent-dim);
+  border-style: dashed;
+}
+
+.reminders__row--raised {
+  opacity: 0.55;
+}
+
+.reminders__pill {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-align: center;
+  padding: 2px 0;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  color: var(--color-text-muted);
+}
+
+.reminders__pill--imminent,
+.reminders__pill--due {
+  color: var(--color-accent);
+}
+
+.reminders__pill--untimed {
+  color: var(--color-accent-dim);
+}
+
+.reminders__pill--raised {
+  color: var(--color-status-online);
+}
+
+.reminders__what {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Tabular figures so a counting-down number does not jitter its own width
+   once a second. */
+.reminders__timer {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+.reminders__row--imminent .reminders__timer,
+.reminders__row--due .reminders__timer {
+  color: var(--color-accent);
+}
+
+.reminders__never {
+  color: var(--color-accent-dim);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+}
+
+.reminders__dismiss {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.reminders__dismiss:hover {
+  color: var(--color-accent);
+  border-color: var(--color-accent-dim);
+}
+
+/* The last minute, and only the last minute. A pulse that runs all day is
+   wallpaper; one that starts when a reminder is about to speak is a warning.
+   Respects a reduced-motion preference by simply not moving. */
+@media (prefers-reduced-motion: no-preference) {
+  .reminders__row--imminent {
+    animation: reminders-pulse 2s ease-in-out infinite;
+  }
+}
+
+@keyframes reminders-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(230, 57, 70, 0);
+  }
+  50% {
+    box-shadow: 0 0 12px 0 rgba(230, 57, 70, 0.25);
+  }
+}
+
+/* The row gained a ring between the text and the number. */
+.reminders__row {
+  grid-template-columns: 74px 1fr auto auto 20px;
+}
+
+.reminders__empty {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+/* ── Composer ─────────────────────────────────────────────────────────── */
+
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.composer__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+/* The prompt character does the work a label would, in the idiom the rest of
+   the application already speaks. */
+.composer__prompt {
+  font-family: var(--font-mono);
+  color: var(--color-accent);
+  font-weight: 700;
+}
+
+.composer__input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: var(--space-xs) 0;
+}
+
+.composer__input:focus {
+  outline: none;
+}
+
+.composer__input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.composer__add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.composer__add:hover:not(:disabled) {
+  color: var(--color-accent);
+  border-color: var(--color-accent-dim);
+}
+
+.composer__add:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.composer__chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.composer__chip {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.composer__chip:hover:not(:disabled) {
+  border-color: var(--color-text-secondary);
+}
+
+.composer__chip--on {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+/* Says when it will fire, in the same line as the choice that decides it. */
+.composer__when {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.composer__error {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-accent);
+  margin: 0;
+}
+
+/* ── Countdown ring ───────────────────────────────────────────────────── */
+
+.ring__track {
+  stroke: var(--color-border);
+}
+
+.ring__arc {
+  stroke: var(--color-text-secondary);
+  /* Matches the tick: the arc should move with the number, not chase it. */
+  transition: stroke-dashoffset 1s linear, stroke 0.3s ease;
+}
+
+.ring--imminent .ring__arc {
+  stroke: var(--color-accent);
+}

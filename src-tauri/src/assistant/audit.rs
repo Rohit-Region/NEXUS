@@ -288,7 +288,9 @@ mod tests {
         // Guards the privacy rule structurally: there is nowhere to put
         // observed content even if a future caller tried.
         let conn = test_conn();
-        let mut stmt = conn.prepare("PRAGMA table_info(action_audit)").expect("pragma");
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(action_audit)")
+            .expect("pragma");
         let columns: Vec<String> = stmt
             .query_map([], |row| row.get::<_, String>(1))
             .expect("query")

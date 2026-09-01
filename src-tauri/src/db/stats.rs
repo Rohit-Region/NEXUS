@@ -126,17 +126,17 @@ pub fn workspace_summary(conn: &Connection) -> Result<WorkspaceSummary, String> 
         ],
         |row| {
             Ok(WorkspaceSummary {
-                projects:            row.get(0)?,
-                tasks:               row.get(1)?,
-                tasks_open:          row.get(2)?,
-                tasks_in_progress:   row.get(3)?,
-                tasks_blocked:       row.get(4)?,
-                tasks_done:          row.get(5)?,
-                tasks_unassigned:    row.get(6)?,
-                ides_total:          row.get(7)?,
-                ides_enabled:        row.get(8)?,
-                agents_total:        row.get(9)?,
-                agents_enabled:      row.get(10)?,
+                projects: row.get(0)?,
+                tasks: row.get(1)?,
+                tasks_open: row.get(2)?,
+                tasks_in_progress: row.get(3)?,
+                tasks_blocked: row.get(4)?,
+                tasks_done: row.get(5)?,
+                tasks_unassigned: row.get(6)?,
+                ides_total: row.get(7)?,
+                ides_enabled: row.get(8)?,
+                agents_total: row.get(9)?,
+                agents_enabled: row.get(10)?,
             })
         },
     )
@@ -172,13 +172,13 @@ pub fn count_tasks_by_project(conn: &Connection) -> Result<Vec<ProjectTaskCounts
             ],
             |row| {
                 Ok(ProjectTaskCounts {
-                    project_id:  row.get(0)?,
-                    total:       row.get(1)?,
+                    project_id: row.get(0)?,
+                    total: row.get(1)?,
                     // SUM over zero rows is NULL, not 0.
-                    open:        row.get::<_, Option<i64>>(2)?.unwrap_or(0),
+                    open: row.get::<_, Option<i64>>(2)?.unwrap_or(0),
                     in_progress: row.get::<_, Option<i64>>(3)?.unwrap_or(0),
-                    blocked:     row.get::<_, Option<i64>>(4)?.unwrap_or(0),
-                    done:        row.get::<_, Option<i64>>(5)?.unwrap_or(0),
+                    blocked: row.get::<_, Option<i64>>(4)?.unwrap_or(0),
+                    done: row.get::<_, Option<i64>>(5)?.unwrap_or(0),
                 })
             },
         )
@@ -205,7 +205,7 @@ pub fn count_tasks_by_agent(conn: &Connection) -> Result<Vec<AgentTaskCounts>, S
     let rows = stmt
         .query_map([], |row| {
             Ok(AgentTaskCounts {
-                agent_id:   row.get(0)?,
+                agent_id: row.get(0)?,
                 task_count: row.get(1)?,
             })
         })
@@ -404,7 +404,10 @@ mod tests {
         assert_eq!(s.tasks, 2, "an unknown status still counts in the total");
         let bucketed = s.tasks_open + s.tasks_in_progress + s.tasks_blocked + s.tasks_done;
         assert_eq!(bucketed, 1, "it must land in no bucket");
-        assert!(bucketed < s.tasks, "the buckets deliberately do not partition");
+        assert!(
+            bucketed < s.tasks,
+            "the buckets deliberately do not partition"
+        );
     }
 
     // -- Per-project counts --------------------------------------------------
@@ -517,8 +520,11 @@ mod tests {
         )
         .expect("assign");
 
-        conn.execute("DELETE FROM ai_agents WHERE id = ?1", rusqlite::params![doomed])
-            .expect("delete agent");
+        conn.execute(
+            "DELETE FROM ai_agents WHERE id = ?1",
+            rusqlite::params![doomed],
+        )
+        .expect("delete agent");
 
         let counts = count_tasks_by_agent(&conn).expect("counts");
 

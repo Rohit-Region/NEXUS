@@ -49,7 +49,11 @@ pub fn insert_ide(
 
 /// Return registered IDEs, newest first. `enabled_only` filters out disabled rows.
 pub fn list_ides(conn: &Connection, enabled_only: bool) -> Result<Vec<RegistryEntry>, String> {
-    let filter = if enabled_only { "WHERE enabled = 1" } else { "" };
+    let filter = if enabled_only {
+        "WHERE enabled = 1"
+    } else {
+        ""
+    };
 
     let mut stmt = conn
         .prepare(&format!(
@@ -197,7 +201,10 @@ mod tests {
         )
         .expect_err("empty name must be rejected");
 
-        assert!(err.contains("Name cannot be empty"), "unexpected error: {err}");
+        assert!(
+            err.contains("Name cannot be empty"),
+            "unexpected error: {err}"
+        );
         assert!(list_ides(&conn, false).expect("list").is_empty());
     }
 
@@ -215,7 +222,10 @@ mod tests {
         )
         .expect_err("empty type must be rejected");
 
-        assert!(err.contains("Type cannot be empty"), "unexpected error: {err}");
+        assert!(
+            err.contains("Type cannot be empty"),
+            "unexpected error: {err}"
+        );
         assert!(list_ides(&conn, false).expect("list").is_empty());
     }
 
@@ -382,7 +392,10 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("read other project");
-        assert_eq!(untouched, Some(other.id), "other defaults must be untouched");
+        assert_eq!(
+            untouched,
+            Some(other.id),
+            "other defaults must be untouched"
+        );
     }
-
 }

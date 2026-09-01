@@ -64,9 +64,7 @@ fn escape_like(query: &str) -> String {
 
 /// Rows are ordered within each kind by lowercase title then id, matching the
 /// total-ordering rule NEXUS-007 established for the frontend comparators.
-fn map_result(
-    kind: &'static str,
-) -> impl Fn(&rusqlite::Row<'_>) -> RusqliteResult<SearchResult> {
+fn map_result(kind: &'static str) -> impl Fn(&rusqlite::Row<'_>) -> RusqliteResult<SearchResult> {
     move |row| {
         Ok(SearchResult {
             kind: kind.to_string(),
@@ -193,7 +191,13 @@ mod tests {
         conn
     }
 
-    fn project(conn: &Connection, name: &str, desc: Option<&str>, path: Option<&str>, url: Option<&str>) -> i64 {
+    fn project(
+        conn: &Connection,
+        name: &str,
+        desc: Option<&str>,
+        path: Option<&str>,
+        url: Option<&str>,
+    ) -> i64 {
         conn.execute(
             "INSERT INTO projects (name, description, repository_path, repository_url)
              VALUES (?1, ?2, ?3, ?4)",
@@ -269,7 +273,10 @@ mod tests {
         project(&conn, "Groundwork", None, None, None);
 
         assert_eq!(
-            search_workspace(&conn, "undwo").expect("search").results.len(),
+            search_workspace(&conn, "undwo")
+                .expect("search")
+                .results
+                .len(),
             1,
             "a mid-word substring must match"
         );
@@ -285,7 +292,11 @@ mod tests {
 
         for marker in ["NameHit", "DescHit", "PathHit", "UrlHit"] {
             let r = search_workspace(&conn, marker).expect("search");
-            assert_eq!(r.results.len(), 1, "{marker} must match exactly one project");
+            assert_eq!(
+                r.results.len(),
+                1,
+                "{marker} must match exactly one project"
+            );
             assert_eq!(r.results[0].kind, "project");
         }
     }
@@ -415,7 +426,10 @@ mod tests {
 
         let r = search_workspace(&conn, "CAPPED").expect("search");
         assert_eq!(r.results.len(), SEARCH_RESULT_CAP);
-        assert!(r.truncated, "reaching the cap must be reported, never silent");
+        assert!(
+            r.truncated,
+            "reaching the cap must be reported, never silent"
+        );
     }
 
     #[test]
@@ -441,7 +455,16 @@ mod tests {
         assert!(r.results.is_empty());
 
         // And the rows are still findable by their populated columns.
-        assert_eq!(search_workspace(&conn, "NoExtras").expect("s").results.len(), 1);
-        assert_eq!(search_workspace(&conn, "BareIde").expect("s").results.len(), 1);
+        assert_eq!(
+            search_workspace(&conn, "NoExtras")
+                .expect("s")
+                .results
+                .len(),
+            1
+        );
+        assert_eq!(
+            search_workspace(&conn, "BareIde").expect("s").results.len(),
+            1
+        );
     }
 }

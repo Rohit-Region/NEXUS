@@ -55,6 +55,12 @@ export interface ConnectorView {
   granted: Permission[];
   /** Levels this connector's actions actually use. */
   requiredLevels: Permission[];
+  /**
+   * Stored configuration: endpoints and account names. Safe to display, as
+   * the setter refuses any key that looks like a secret. Null when the
+   * connector has never been configured.
+   */
+  config: Record<string, string> | null;
 }
 
 export interface ActionRequest {
@@ -68,6 +74,8 @@ export interface ActionOutcome {
   actionId: string;
   output: unknown;
   summary: string;
+  /** What the action found, described by the connector. */
+  detail?: string;
   auditId: number;
 }
 
@@ -185,7 +193,17 @@ export interface RenderedList {
 export type Resolution =
   | { kind: 'resolved'; referent: Referent }
   | { kind: 'ambiguous'; candidates: Referent[] }
-  | { kind: 'unresolved'; reason: string };
+  | {
+      kind: 'unresolved';
+      reason: string;
+      /**
+       * True when NEXUS followed the request and the answer is no (no such
+       * contact, connector not set up). False when it never made sense of
+       * the words, which with an open microphone is usually a fragment of
+       * the room rather than anything addressed to it.
+       */
+      understood: boolean;
+    };
 
 export interface SessionSnapshot {
   state: AssistantState;
@@ -193,6 +211,11 @@ export interface SessionSnapshot {
   referents: Referent[];
   lists: RenderedList[];
   pendingApprovals: number;
+  /**
+   * An action a bare "yes" would run, offered by whatever ran last. Absent
+   * once it expires, so a stale offer cannot be answered.
+   */
+  pendingFollowUp: { actionId: string; prompt: string } | null;
 }
 
 export interface ProjectContext {
@@ -230,6 +253,12 @@ export interface Choice {
   /** A registry id from src/lib/commands.ts, not a typed action id. */
   commandId: string;
   label: string;
+  /**
+   * Arguments to run this choice with, when the options differ by their
+   * input rather than by which action they are: two similarly-named
+   * contacts are the same action twice, distinguished only by the number.
+   */
+  input?: unknown;
 }
 
 /**
@@ -240,6 +269,16 @@ export interface Choice {
  */
 export type AssistantReply =
   | { kind: 'answer'; text: string; cited: string[] }
-  | { kind: 'action'; commandId: string; summary: string }
+  | { kind: 'action'; commandId: string; summary: string; input?: unknown }
   | { kind: 'choices'; candidates: Choice[] }
-  | { kind: 'unresolved'; reason: string };
+  | {
+      kind: 'unresolved';
+      reason: string;
+      /**
+       * True when NEXUS followed the request and the answer is no (no such
+       * contact, connector not set up). False when it never made sense of
+       * the words, which with an open microphone is usually a fragment of
+       * the room rather than anything addressed to it.
+       */
+      understood: boolean;
+    };

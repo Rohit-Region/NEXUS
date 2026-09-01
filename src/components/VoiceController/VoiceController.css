@@ -61,3 +61,16 @@
   color: var(--color-text-muted);
   white-space: normal;
 }
+
+/*
+ * Armed: NEXUS has answered to its name and is waiting for the command.
+ * Distinct from the resting always-listening state, which is deliberately
+ * quiet so a permanently visible indicator is not a permanent distraction.
+ */
+.voice-indicator--armed {
+  border-color: var(--nexus-accent, #4c8dff);
+}
+
+.voice-indicator--armed .voice-indicator__dot {
+  background: var(--nexus-accent, #4c8dff);
+}

@@ -16,6 +16,7 @@
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -28,6 +29,35 @@ const MAX_TURNS: usize = 24;
 /// way they fall out of a person's working memory.
 const MAX_REFERENTS: usize = 60;
 const MAX_LISTS: usize = 10;
+
+/// How long an offered follow-up stays answerable by a bare "yes".
+///
+/// The same reasoning as `APPROVAL_TTL`, at a shorter distance: a "yes"
+/// arriving two minutes after the offer is answering a question the user has
+/// almost certainly stopped looking at. Letting it expire is how a stale
+/// affirmation stops being able to send something.
+pub const FOLLOW_UP_TTL: Duration = Duration::from_secs(120);
+
+/// An action the previous one left ready, which a bare "yes" may run.
+///
+/// This is the whole mechanism behind "send it" after a draft is on screen.
+/// It holds an action *id*, never an input: the follow-up runs with no
+/// arguments, so there is nothing here for a stale offer to send anywhere.
+/// It is also not an approval. The gate still asks, exactly as it would from
+/// the palette, which is what keeps "yes" from being a way around
+/// `ConfirmPolicy::Always`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingFollowUp {
+    pub action_id: String,
+    /// What to run it with. Built by the connector from the action that just
+    /// ran, never from whoever says "yes": a bare affirmation supplies no
+    /// arguments, so it cannot redirect this at a different target.
+    pub input: serde_json::Value,
+    /// What NEXUS should say when the reply was not understood. Written by
+    /// the connector, because only it knows what it is waiting for.
+    pub prompt: String,
+}
 
 /// What NEXUS is doing.
 ///
@@ -103,6 +133,9 @@ pub struct SessionSnapshot {
     pub lists: Vec<RenderedList>,
     /// Approvals still waiting. Read from the approval store, not stored here.
     pub pending_approvals: usize,
+    /// An action a bare "yes" would run, if one is still on offer. Expired
+    /// offers are absent rather than stale: see `FOLLOW_UP_TTL`.
+    pub pending_follow_up: Option<PendingFollowUp>,
 }
 
 /// The live session. Tauri managed state.
@@ -120,6 +153,9 @@ struct Inner {
     referents: VecDeque<Referent>,
     lists: VecDeque<RenderedList>,
     current_turn: Option<u64>,
+    /// Stamped when offered, so the TTL is measured from the moment the user
+    /// was shown it rather than from anything they did afterwards.
+    follow_up: Option<(PendingFollowUp, Instant)>,
 }
 
 impl Default for AssistantState {
@@ -271,8 +307,47 @@ impl AssistantSession {
         super::referent::resolve(phrase, &referents, &lists)
     }
 
+    /// Offer an action that a bare "yes" may run next.
+    ///
+    /// Replaces any earlier offer. Two live follow-ups would make "yes"
+    /// ambiguous, and an ambiguous "yes" that sends a message is exactly the
+    /// failure this exists to prevent.
+    pub fn offer_follow_up(&self, action_id: &str, input: serde_json::Value, prompt: &str) {
+        let mut inner = self.lock();
+        inner.follow_up = Some((
+            PendingFollowUp {
+                action_id: action_id.to_string(),
+                input,
+                prompt: prompt.to_string(),
+            },
+            Instant::now(),
+        ));
+    }
+
+    /// Withdraw the offer. Called when the user declines, and after any
+    /// action runs, so an offer never outlives the thing it followed.
+    pub fn clear_follow_up(&self) {
+        self.lock().follow_up = None;
+    }
+
+    /// The live offer, if there is one and it has not expired.
+    pub fn pending_follow_up(&self) -> Option<PendingFollowUp> {
+        let mut inner = self.lock();
+        match &inner.follow_up {
+            Some((_, offered)) if offered.elapsed() >= FOLLOW_UP_TTL => {
+                inner.follow_up = None;
+                None
+            }
+            Some((pending, _)) => Some(pending.clone()),
+            None => None,
+        }
+    }
+
     pub fn snapshot(&self, pending_approvals: usize) -> SessionSnapshot {
         let state = self.state();
+        // Before the lock below, not inside it: `pending_follow_up` takes the
+        // same lock to expire a stale offer, and taking it twice deadlocks.
+        let pending_follow_up = self.pending_follow_up();
         let inner = self.lock();
         SessionSnapshot {
             state,
@@ -280,11 +355,15 @@ impl AssistantSession {
             referents: inner.referents.iter().cloned().collect(),
             lists: inner.lists.iter().cloned().collect(),
             pending_approvals,
+            pending_follow_up,
         }
     }
 
     /// Abandon the open turn. Cancelling is a normal outcome, not an error.
     pub fn cancel(&self) {
+        // The offer goes with it. A follow-up that survived a cancellation
+        // would let a later "yes" run something the user just called off.
+        self.clear_follow_up();
         self.advance(AssistantState::Cancelled, None, None);
     }
 
@@ -295,6 +374,7 @@ impl AssistantSession {
         inner.referents.clear();
         inner.lists.clear();
         inner.current_turn = None;
+        inner.follow_up = None;
         inner.state = AssistantState::Idle;
     }
 }
@@ -337,7 +417,10 @@ mod tests {
 
         let snapshot = session.snapshot(0);
         assert_eq!(snapshot.turns.len(), 1);
-        assert_eq!(snapshot.turns[0].summary.as_deref(), Some("Opening Settings"));
+        assert_eq!(
+            snapshot.turns[0].summary.as_deref(),
+            Some("Opening Settings")
+        );
     }
 
     #[test]
@@ -455,12 +538,7 @@ mod tests {
         let session = AssistantSession::default();
         let mut seen = std::collections::HashSet::new();
         for _ in 0..200 {
-            assert!(seen.insert(session.remember(
-                ReferentKind::Task,
-                "t",
-                "nexus",
-                json!({})
-            )));
+            assert!(seen.insert(session.remember(ReferentKind::Task, "t", "nexus", json!({}))));
         }
     }
 
@@ -468,7 +546,10 @@ mod tests {
     fn zero_is_never_a_valid_id() {
         let session = AssistantSession::default();
         assert_ne!(session.begin_turn(text("x")), 0);
-        assert_ne!(session.remember(ReferentKind::Task, "t", "nexus", json!({})), 0);
+        assert_ne!(
+            session.remember(ReferentKind::Task, "t", "nexus", json!({})),
+            0
+        );
         assert_ne!(session.remember_list(vec![1]), Some(0));
     }
 
@@ -492,7 +573,7 @@ mod tests {
             "github",
             json!({ "number": 8792 }),
         );
-        let issue = session.remember(ReferentKind::JiraIssue, "KAI-515", "jira", json!({}));
+        let issue = session.remember(ReferentKind::JiraIssue, "PROJ-515", "jira", json!({}));
         session.remember_list(vec![pr, issue]);
         session.advance(AssistantState::Completed, None, None);
 
@@ -504,7 +585,7 @@ mod tests {
             other => panic!("expected the PR, got {other:?}"),
         }
         match session.resolve("do the second one") {
-            Resolution::Resolved { referent } => assert_eq!(referent.display_name, "KAI-515"),
+            Resolution::Resolved { referent } => assert_eq!(referent.display_name, "PROJ-515"),
             other => panic!("expected the second item, got {other:?}"),
         }
     }

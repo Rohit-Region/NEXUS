@@ -30,6 +30,7 @@ pub mod intent;
 pub mod response;
 /// NEXUS-011: on-device speech synthesis.
 pub mod speech;
+pub mod wake;
 
 use std::cell::RefCell;
 use std::ptr::NonNull;
@@ -57,6 +58,15 @@ const PRE_SPEECH_TIMEOUT: Duration = Duration::from_secs(8);
 const MAX_SESSION: Duration = Duration::from_secs(30);
 /// Tap buffer size. 4096 frames is roughly 90ms at 44.1kHz.
 const TAP_BUFFER_FRAMES: u32 = 4096;
+/// Ceiling on one session while always-listening. Apple caps a single
+/// on-device request at roughly a minute, so the supervisor recycles the
+/// session well before that rather than letting the framework end it.
+const ALWAYS_SESSION: Duration = Duration::from_secs(45);
+/// Gap between a session ending and the next one starting. This is the
+/// window in which NEXUS is genuinely deaf; it is short, not zero.
+const RESTART_GAP: Duration = Duration::from_millis(400);
+/// Consecutive failed reopens before always-listening gives up and says so.
+const MAX_RESTART_FAILURES: u32 = 5;
 
 pub const EVENT_TRANSCRIPT: &str = "nexus://voice/transcript";
 pub const EVENT_STATE: &str = "nexus://voice/state";
@@ -71,6 +81,19 @@ static SESSION_ID: AtomicU64 = AtomicU64::new(0);
 /// Whether this session has produced any transcript yet, selecting which
 /// timeout the watchdog applies.
 static GOT_RESULT: AtomicBool = AtomicBool::new(false);
+/// Always-listening mode: the supervisor keeps a session alive rather than
+/// the microphone opening only when asked. Opt-in, and off on a fresh
+/// install; nothing here changes what leaves the machine, which is nothing.
+static ALWAYS: AtomicBool = AtomicBool::new(false);
+/// Set while NEXUS is speaking. The synthesizer is audible to the
+/// microphone, so the supervisor must not reopen it mid-sentence or NEXUS
+/// transcribes its own voice as the next command.
+static MUTED: AtomicBool = AtomicBool::new(false);
+/// Incremented per supervisor so an old one retires when the mode is
+/// toggled off and on again.
+static SUPERVISOR: AtomicU64 = AtomicU64::new(0);
+/// Turn counter behind the rotating acknowledgement.
+static WAKE_TURN: AtomicU64 = AtomicU64::new(0);
 
 fn now_ms() -> u64 {
     SystemTime::now()
@@ -203,7 +226,7 @@ fn stop_session_main(app: &AppHandle, reason: &str) {
 }
 
 /// Build and start a recognition session. Main thread only.
-fn start_session_main(app: &AppHandle) -> Result<(), String> {
+fn start_session_main(app: &AppHandle, reason: &str) -> Result<(), String> {
     if LISTENING.load(Ordering::SeqCst) {
         return Ok(());
     }
@@ -235,9 +258,7 @@ fn start_session_main(app: &AppHandle) -> Result<(), String> {
         // Belt and braces: if the flag did not take, stop before any audio is
         // captured rather than trusting the setter.
         if !request.requiresOnDeviceRecognition() {
-            return Err(
-                "Could not force on-device recognition; refusing to start.".to_string(),
-            );
+            return Err("Could not force on-device recognition; refusing to start.".to_string());
         }
     }
 
@@ -276,7 +297,10 @@ fn start_session_main(app: &AppHandle) -> Result<(), String> {
 
             let (text, is_final) = unsafe {
                 let r = &*result;
-                (r.bestTranscription().formattedString().to_string(), r.isFinal())
+                (
+                    r.bestTranscription().formattedString().to_string(),
+                    r.isFinal(),
+                )
             };
 
             let _ = handler_app.emit(
@@ -298,7 +322,8 @@ fn start_session_main(app: &AppHandle) -> Result<(), String> {
         },
     );
 
-    let task = unsafe { recognizer.recognitionTaskWithRequest_resultHandler(&request, &result_handler) };
+    let task =
+        unsafe { recognizer.recognitionTaskWithRequest_resultHandler(&request, &result_handler) };
 
     // Microphone tap. Buffers are appended and immediately dropped; nothing is
     // retained, copied to disk, or logged.
@@ -349,7 +374,7 @@ fn start_session_main(app: &AppHandle) -> Result<(), String> {
         EVENT_STATE,
         VoiceState {
             listening: true,
-            reason: "user".to_string(),
+            reason: reason.to_string(),
         },
     );
 
@@ -367,15 +392,25 @@ fn spawn_watchdog(app: AppHandle, session_id: u64, started: Instant) {
             return;
         }
 
+        let always = ALWAYS.load(Ordering::SeqCst);
         let idle_ms = now_ms().saturating_sub(LAST_ACTIVITY_MS.load(Ordering::SeqCst));
-        let allowed = if GOT_RESULT.load(Ordering::SeqCst) {
-            SILENCE_TIMEOUT
-        } else {
-            PRE_SPEECH_TIMEOUT
+        let spoke = GOT_RESULT.load(Ordering::SeqCst);
+        // Waiting to be addressed is not idleness. In always-listening the
+        // pre-speech timeout would end the session every few seconds while
+        // the room is quiet, which is exactly when it needs to be open.
+        let allowed = match (always, spoke) {
+            (_, true) => Some(SILENCE_TIMEOUT),
+            (true, false) => None,
+            (false, false) => Some(PRE_SPEECH_TIMEOUT),
         };
-        let reason = if started.elapsed() >= MAX_SESSION {
-            "timeout"
-        } else if idle_ms >= allowed.as_millis() as u64 {
+        let ceiling = if always { ALWAYS_SESSION } else { MAX_SESSION };
+        let reason = if started.elapsed() >= ceiling {
+            if always {
+                "recycle"
+            } else {
+                "timeout"
+            }
+        } else if allowed.is_some_and(|a| idle_ms >= a.as_millis() as u64) {
             "silence"
         } else {
             continue;
@@ -405,12 +440,116 @@ pub fn request_authorization(app: &AppHandle) -> Result<(), String> {
 
 pub fn start(app: &AppHandle) -> Result<(), String> {
     let app2 = app.clone();
-    run_main_fallible(app, move || start_session_main(&app2))
+    run_main_fallible(app, move || start_session_main(&app2, "user"))
 }
 
 pub fn stop(app: &AppHandle) -> Result<(), String> {
     let app2 = app.clone();
     run_main(app, move || stop_session_main(&app2, "user"))
+}
+
+// -- Always-listening --------------------------------------------------------
+
+/// Whether the microphone is being kept open for a wake word.
+pub fn always_listening() -> bool {
+    ALWAYS.load(Ordering::SeqCst)
+}
+
+/// Turn always-listening on or off.
+///
+/// Turning it on starts the supervisor, which is the only thing that
+/// reopens the microphone on its own. Turning it off retires the supervisor
+/// and closes the microphone immediately rather than at the end of the
+/// current session.
+pub fn set_always_listening(app: &AppHandle, on: bool) -> Result<(), String> {
+    let was = ALWAYS.swap(on, Ordering::SeqCst);
+    if on {
+        if !was {
+            let generation = SUPERVISOR.fetch_add(1, Ordering::SeqCst) + 1;
+            spawn_supervisor(app.clone(), generation);
+        }
+        let app2 = app.clone();
+        return run_main_fallible(app, move || start_session_main(&app2, "always"));
+    }
+
+    // Retire the supervisor before closing, so it cannot race a reopen.
+    SUPERVISOR.fetch_add(1, Ordering::SeqCst);
+    MUTED.store(false, Ordering::SeqCst);
+    let app2 = app.clone();
+    run_main(app, move || stop_session_main(&app2, "user"))
+}
+
+/// Close the microphone for the duration of a spoken reply.
+///
+/// Called by the synthesizer rather than the UI: this has to happen at the
+/// last moment before audio is produced, or the tail of the previous
+/// session hears the first syllable.
+pub fn mute_for_speech(app: &AppHandle) {
+    MUTED.store(true, Ordering::SeqCst);
+    if LISTENING.load(Ordering::SeqCst) {
+        stop_session_main(app, "speaking");
+    }
+}
+
+/// Reopen the microphone once the reply has finished.
+pub fn unmute_after_speech() {
+    MUTED.store(false, Ordering::SeqCst);
+}
+
+/// The next acknowledgement, advancing the rotation.
+pub fn next_wake_reply(replies: &[String]) -> String {
+    let turn = WAKE_TURN.fetch_add(1, Ordering::SeqCst);
+    wake::reply(replies, turn)
+}
+
+/// Keeps a session alive while always-listening is on.
+///
+/// Deliberately a poll rather than a callback chain: sessions end for five
+/// different reasons and every one of them must lead back to listening.
+fn spawn_supervisor(app: AppHandle, generation: u64) {
+    std::thread::spawn(move || {
+        let mut failures: u32 = 0;
+        loop {
+            std::thread::sleep(RESTART_GAP);
+
+            if !ALWAYS.load(Ordering::SeqCst) || SUPERVISOR.load(Ordering::SeqCst) != generation {
+                return;
+            }
+            if MUTED.load(Ordering::SeqCst) || LISTENING.load(Ordering::SeqCst) {
+                continue;
+            }
+
+            let app2 = app.clone();
+            match run_main_fallible(&app, move || start_session_main(&app2, "always")) {
+                Ok(()) => failures = 0,
+                Err(message) => {
+                    // One failure is routine: the microphone can be busy for a
+                    // moment. A run of them is not, and retrying four times a
+                    // second forever would hide a denied microphone behind a
+                    // silent busy loop.
+                    failures += 1;
+                    if failures >= MAX_RESTART_FAILURES {
+                        ALWAYS.store(false, Ordering::SeqCst);
+                        let _ = app.emit(
+                            EVENT_ERROR,
+                            format!(
+                                "Always-listening stopped: the microphone could not be \
+                             reopened. {message}"
+                            ),
+                        );
+                        let _ = app.emit(
+                            EVENT_STATE,
+                            VoiceState {
+                                listening: false,
+                                reason: "error".to_string(),
+                            },
+                        );
+                        return;
+                    }
+                }
+            }
+        }
+    });
 }
 
 /// Whether the microphone is currently open.
@@ -459,7 +598,10 @@ mod tests {
             auth_label(SFSpeechRecognizerAuthorizationStatus::NotDetermined),
             "notDetermined"
         );
-        assert_eq!(auth_label(SFSpeechRecognizerAuthorizationStatus::Denied), "denied");
+        assert_eq!(
+            auth_label(SFSpeechRecognizerAuthorizationStatus::Denied),
+            "denied"
+        );
         assert_eq!(
             auth_label(SFSpeechRecognizerAuthorizationStatus::Restricted),
             "restricted"
@@ -483,11 +625,17 @@ mod tests {
     #[test]
     fn silence_and_session_bounds_are_sane() {
         // V-07: both bounds must be finite and silence must trip first.
-        assert!(SILENCE_TIMEOUT < PRE_SPEECH_TIMEOUT, "speaking needs a grace period");
+        assert!(
+            SILENCE_TIMEOUT < PRE_SPEECH_TIMEOUT,
+            "speaking needs a grace period"
+        );
         assert!(PRE_SPEECH_TIMEOUT < MAX_SESSION);
         assert!(SILENCE_TIMEOUT < MAX_SESSION);
         assert!(SILENCE_TIMEOUT.as_millis() > 0);
-        assert!(MAX_SESSION.as_secs() <= 60, "sessions must not run unbounded");
+        assert!(
+            MAX_SESSION.as_secs() <= 60,
+            "sessions must not run unbounded"
+        );
     }
 
     #[test]
@@ -550,7 +698,14 @@ mod tests {
     #[test]
     fn no_filesystem_or_network_in_voice_path() {
         let code = code_only();
-        for forbidden in ["std::fs", "File::", "reqwest", "TcpStream", "http://", "https://"] {
+        for forbidden in [
+            "std::fs",
+            "File::",
+            "reqwest",
+            "TcpStream",
+            "http://",
+            "https://",
+        ] {
             assert!(
                 !code.contains(forbidden),
                 "voice path must not reference {forbidden}"
@@ -565,10 +720,14 @@ mod tests {
     #[test]
     fn teardown_clears_listening_before_cancelling() {
         let code = code_only();
-        let stop = &code[code.find("fn stop_session_main").expect("stop_session_main")..];
+        let stop = &code[code
+            .find("fn stop_session_main")
+            .expect("stop_session_main")..];
         let stop = &stop[..stop.find("\n}").unwrap_or(stop.len())];
 
-        let flag = stop.find("LISTENING.swap(false").expect("must clear the flag");
+        let flag = stop
+            .find("LISTENING.swap(false")
+            .expect("must clear the flag");
         let cancel = stop.find("task.cancel()").expect("must cancel the task");
         assert!(
             flag < cancel,

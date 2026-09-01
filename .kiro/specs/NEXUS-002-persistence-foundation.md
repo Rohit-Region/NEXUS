@@ -175,7 +175,7 @@ The spec lists `default_ide` and `default_ai_agent` as direct columns on `projec
 
 **Decision 2 — `external_id` in `tasks`**
 
-`external_id` is kept as `TEXT NULL` — it is the future home of a Jira issue key (e.g., `"KAI-102"`). It is nullable because tasks created locally before Jira integration will have no external ID. A unique index is added scoped to `(project_id, external_id)` to prevent duplicate Jira imports per project.
+`external_id` is kept as `TEXT NULL` — it is the future home of a Jira issue key (e.g., `"PROJ-102"`). It is nullable because tasks created locally before Jira integration will have no external ID. A unique index is added scoped to `(project_id, external_id)` to prevent duplicate Jira imports per project.
 
 **Decision 3 — `settings` primary key**
 
@@ -224,7 +224,7 @@ CREATE TABLE IF NOT EXISTS projects (
 
 CREATE TABLE IF NOT EXISTS tasks (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    external_id    TEXT,                      -- future: Jira key e.g. KAI-102
+    external_id    TEXT,                      -- future: Jira key e.g. PROJ-102
     title          TEXT    NOT NULL,
     description    TEXT,
     status         TEXT    NOT NULL DEFAULT 'open',

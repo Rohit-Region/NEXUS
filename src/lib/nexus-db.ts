@@ -23,7 +23,10 @@ import type {
   VoiceIntent,
   VoiceOption,
   VoiceOutcome,
+  Contact,
+  ContactInput,
   VoiceSpeech,
+  WakeOutcome,
   VoiceStatus,
   VoiceTranscript,
   Task,
@@ -176,6 +179,49 @@ export function voiceStop(): Promise<void> {
   return invoke<void>('nexus_voice_stop');
 }
 
+// ── Contacts ────────────────────────────────────────────────────────────────
+//
+// The only people NEXUS can message. Every call returns the full list, so the
+// caller never has to reconcile a local copy with what was stored.
+
+export function listContacts(): Promise<Contact[]> {
+  return invoke<Contact[]>('nexus_list_contacts');
+}
+
+/** Create when `id` is null, update otherwise. Returns the refreshed list. */
+export function saveContact(contact: ContactInput): Promise<Contact[]> {
+  return invoke<Contact[]>('nexus_save_contact', { contact });
+}
+
+export function deleteContact(id: number): Promise<Contact[]> {
+  return invoke<Contact[]>('nexus_delete_contact', { id });
+}
+
+// ── Always-listening and the wake word ──────────────────────────────────────
+
+/**
+ * Bring always-listening into line with the saved preferences.
+ *
+ * The runtime flag is derived in Rust from voiceEnabled and alwaysListening
+ * together, so the UI cannot leave the microphone held open by toggling the
+ * two in the wrong order. Returns whether the microphone is now being kept
+ * open. Safe to call repeatedly; a no-op when nothing changed.
+ */
+export function voiceSyncAlwaysListening(): Promise<boolean> {
+  return invoke<boolean>('nexus_voice_sync_always_listening');
+}
+
+/**
+ * Was this utterance addressed to NEXUS?
+ *
+ * With the microphone permanently open, most of what it hears is not meant
+ * for NEXUS. `woke: false` means discard the transcript entirely: do not
+ * resolve it, do not run it, do not show it.
+ */
+export function voiceWake(transcript: string): Promise<WakeOutcome> {
+  return invoke<WakeOutcome>('nexus_voice_wake', { transcript });
+}
+
 // ── Spoken responses (NEXUS-011) ────────────────────────────────────────────
 //
 // The caller reports what happened; Rust picks the words from a deterministic
@@ -191,6 +237,18 @@ export function voiceStop(): Promise<void> {
  */
 export function voiceSpeak(outcome: VoiceOutcome): Promise<VoiceSpeech> {
   return invoke<VoiceSpeech>('nexus_voice_speak', { outcome });
+}
+
+/**
+ * Speak a response NEXUS composed.
+ *
+ * Distinct from voiceSpeak, which speaks a fixed template keyed by an
+ * executed action. This carries NEXUS's own words: an answer built from local
+ * data, or a connector's description of what it found. Silent when voice is
+ * off, and never speaks while the microphone is open.
+ */
+export function voiceSay(text: string): Promise<VoiceSpeech> {
+  return invoke<VoiceSpeech>('nexus_voice_say', { text });
 }
 
 /** Silence the synthesizer. Safe when nothing is being spoken. */
