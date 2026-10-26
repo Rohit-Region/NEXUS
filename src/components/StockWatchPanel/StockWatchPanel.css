@@ -1,0 +1,366 @@
+/*
+ * The stock-watch card. Its hue is amber-into-green: amber while waiting,
+ * because waiting is the normal state, and a row flips to green the moment its
+ * item is buyable, which is the one event the whole card exists for.
+ */
+.watch {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  background:
+    linear-gradient(
+      160deg,
+      rgba(245, 158, 11, 0.06) 0%,
+      rgba(245, 158, 11, 0.015) 30%,
+      var(--color-bg-secondary) 55%
+    );
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.watch__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: var(--space-xs);
+  border-bottom: 1px solid var(--color-border);
+  color: #f59e0b;
+}
+
+.watch__title {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.watch__count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.watch__add {
+  display: flex;
+  gap: var(--space-xs);
+}
+
+.watch__input,
+.watch__wa {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 5px 8px;
+  background-color: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+}
+
+.watch__input:focus,
+.watch__wa:focus {
+  outline: none;
+  border-color: rgba(245, 158, 11, 0.5);
+}
+
+.watch__input::placeholder,
+.watch__wa::placeholder {
+  color: var(--color-text-muted);
+}
+
+.watch__add-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  flex: 0 0 auto;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.watch__add-btn:hover:not(:disabled) {
+  color: #f59e0b;
+  border-color: rgba(245, 158, 11, 0.5);
+}
+
+.watch__add-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.watch__empty {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+
+.watch__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.watch__row {
+  display: grid;
+  grid-template-columns: 8px 1fr auto auto 20px 20px;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 5px var(--space-sm);
+  border-radius: var(--radius-sm);
+}
+
+.watch__row--available {
+  background-color: rgba(34, 197, 94, 0.08);
+}
+
+.watch__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+}
+
+.watch__dot--available {
+  background: var(--color-status-online);
+  box-shadow: 0 0 7px rgba(34, 197, 94, 0.8);
+}
+
+.watch__dot--unavailable {
+  background: #f59e0b;
+}
+
+.watch__name {
+  min-width: 0;
+  font-size: 12px;
+  color: var(--color-text-primary);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.watch__name:hover {
+  color: #f59e0b;
+}
+
+.watch__state {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.watch__row--available .watch__state {
+  color: var(--color-status-online);
+  font-weight: 600;
+}
+
+.watch__ago {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.watch__recheck,
+.watch__remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.watch__recheck:hover:not(:disabled) {
+  color: #f59e0b;
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+.watch__remove:hover {
+  color: var(--color-accent);
+  border-color: var(--color-accent-dim);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .watch__recheck--busy {
+    animation: watch-spin 0.9s linear infinite;
+  }
+}
+
+@keyframes watch-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Fires every alert channel on demand, so a failure can be seen without
+   waiting for a real restock. */
+.watch__test {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  background: transparent;
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  border-radius: 999px;
+  color: #f59e0b;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.watch__test:hover {
+  background-color: rgba(245, 158, 11, 0.12);
+}
+
+/* The last alert outcome, in words. Green when something sent, accent when it
+   did not, so a quiet failure reads at a glance. */
+.watch__status {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+/* The alerts area: where a hit goes, kept apart from the watch list by a top
+   rule because it is configured once and then ignored. Amber is the card's
+   accent; the labels and hints stay muted so the inputs lead. */
+.watch__alerts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding-top: var(--space-sm);
+  margin-top: var(--space-xs);
+  border-top: 1px solid var(--color-border);
+}
+
+.watch__alerts-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #f59e0b;
+}
+
+/* One channel: its name, its field, and an optional line saying what it is
+   for. Each is its own block so WhatsApp and the phone push read as two
+   separate things rather than two unlabelled boxes. */
+.watch__channel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.watch__channel-name {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+}
+
+.watch__channel-hint {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 1.4;
+  color: var(--color-text-muted);
+}
+
+/* The keep-awake switch. A plain checkbox with the accent for its tick, and a
+   two-line label: the choice, then the one caveat that matters (a closed lid
+   still sleeps). */
+.watch__toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding-top: var(--space-xs);
+  cursor: pointer;
+}
+
+.watch__toggle-box {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  margin-top: 1px;
+  accent-color: #f59e0b;
+  cursor: pointer;
+}
+
+.watch__toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-primary);
+}
+
+.watch__toggle-hint {
+  font-size: 9px;
+  line-height: 1.4;
+  color: var(--color-text-muted);
+}
+
+/* An input with its own test button beside it. The button is held to the end
+   so the field keeps the width; both share the row's baseline. */
+.watch__channel-row {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-xs);
+}
+
+.watch__channel-row .watch__wa {
+  flex: 1;
+}
+
+.watch__channel-test {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0 12px;
+  background: transparent;
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  border-radius: var(--radius-sm);
+  color: #f59e0b;
+  cursor: pointer;
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+}
+
+.watch__channel-test:hover:not(:disabled) {
+  background-color: rgba(245, 158, 11, 0.12);
+}
+
+.watch__channel-test:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

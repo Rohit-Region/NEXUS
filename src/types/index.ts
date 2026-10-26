@@ -20,7 +20,17 @@ export type NexusScreen =
   | 'projects'
   | 'project-detail'
   | 'registry'
-  | 'settings';
+  | 'settings'
+  // Personal-assistant sections. 'me' is the profile every pillar reads from;
+  // the rest are the life-area workspaces introduced alongside it.
+  | 'me'
+  | 'money'
+  | 'career'
+  | 'learn'
+  | 'news'
+  | 'stocks'
+  // The supervised task clone.
+  | 'clone';
 
 /**
  * NEXUS-009: a one-shot instruction consumed by the destination screen on

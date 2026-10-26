@@ -5,6 +5,13 @@ import { ProjectList } from '../ProjectList/ProjectList';
 import { ProjectDetail } from '../ProjectDetail/ProjectDetail';
 import { RegistryScreen } from '../RegistryScreen/RegistryScreen';
 import { SettingsScreen } from '../SettingsScreen/SettingsScreen';
+import { MeScreen } from '../MeScreen/MeScreen';
+import { MoneyScreen } from '../MoneyScreen/MoneyScreen';
+import { LearnScreen } from '../LearnScreen/LearnScreen';
+import { CareerScreen } from '../CareerScreen/CareerScreen';
+import { CloneScreen } from '../CloneScreen/CloneScreen';
+import { NewsScreen } from '../NewsScreen/NewsScreen';
+import { StocksScreen } from '../StocksScreen/StocksScreen';
 import './Dashboard.css';
 
 interface DashboardProps extends PanelProps {
@@ -15,6 +22,10 @@ interface DashboardProps extends PanelProps {
   onSettingsChange: (next: Settings) => void;
   /** Navigation counter; see AppShell. Only used to force an intent remount. */
   navSeq: number;
+  /** Connector ids the rail has switched on; the Overview shows their cards. */
+  openConnectors: string[];
+  /** Opens the assistant, optionally with a one-off greeting line. */
+  onOpenAssistant: (greeting?: string) => void;
 }
 
 export function Dashboard({
@@ -25,6 +36,8 @@ export function Dashboard({
   settings,
   onSettingsChange,
   navSeq,
+  openConnectors,
+  onOpenAssistant,
 }: DashboardProps) {
   return (
     <main className={`dashboard${className ? ` ${className}` : ''}`} role="main">
@@ -37,7 +50,13 @@ export function Dashboard({
 
       {/* Scrollable content column */}
       <div className="dashboard__scroll">
-        {view.screen === 'overview' && <OverviewScreen navigate={navigate} />}
+        {view.screen === 'overview' && (
+          <OverviewScreen
+            navigate={navigate}
+            openConnectors={openConnectors}
+            onOpenAssistant={onOpenAssistant}
+          />
+        )}
 
         {view.screen === 'projects' && (
           <ProjectList
@@ -71,6 +90,21 @@ export function Dashboard({
             onSettingsChange={onSettingsChange}
           />
         )}
+
+        {/* Personal-assistant sections. 'me' is live; the rest show their
+            roadmap until each is built out in its own slice. */}
+        {view.screen === 'me' && <MeScreen />}
+
+        {view.screen === 'money' && <MoneyScreen />}
+
+        {view.screen === 'career' && <CareerScreen />}
+        {view.screen === 'clone' && <CloneScreen />}
+
+        {view.screen === 'learn' && <LearnScreen />}
+
+        {view.screen === 'news' && <NewsScreen />}
+
+        {view.screen === 'stocks' && <StocksScreen />}
       </div>
     </main>
   );

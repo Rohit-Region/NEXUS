@@ -165,6 +165,92 @@ fn today_bounds(conn: &Connection) -> (String, String) {
     })
 }
 
+/// Today's window as unix seconds, from local midnight to local midnight.
+///
+/// The `'utc'` modifier is doing real work: it says the wall-clock string
+/// handed to `strftime` is local time and must be converted before becoming
+/// an epoch. Without it, everywhere east of Greenwich gets a window shifted
+/// by the offset, which is the same defect that once put reminders a day
+/// out. There is a test below.
+fn today_unix_bounds(conn: &Connection) -> (i64, i64) {
+    conn.query_row(
+        "SELECT strftime('%s', strftime('%Y-%m-%dT00:00:00','now','localtime'), 'utc'),
+                strftime('%s', strftime('%Y-%m-%dT00:00:00','now','localtime','+1 day'), 'utc')",
+        [],
+        |r| {
+            Ok((
+                r.get::<_, String>(0)?.parse::<i64>().unwrap_or(0),
+                r.get::<_, String>(1)?.parse::<i64>().unwrap_or(0),
+            ))
+        },
+    )
+    .unwrap_or((0, 0))
+}
+
+/// "14:30" from unix seconds, in the local zone, via SQLite rather than a
+/// date crate. Matches `clock_of` so both sources read identically.
+fn local_clock(conn: &Connection, unix: i64) -> String {
+    conn.query_row(
+        "SELECT strftime('%H:%M', ?1, 'unixepoch', 'localtime')",
+        [unix],
+        |r| r.get::<_, String>(0),
+    )
+    .unwrap_or_default()
+}
+
+/// Today's meetings from the Mac's own calendar.
+///
+/// The fallback for a tenant whose administrator has not consented to the
+/// app registration. Adding the account under System Settings authenticates
+/// with Apple's client, which is pre-approved where NEXUS's is not, so the
+/// meetings are already here.
+///
+/// A permission problem comes back as an error, never as an empty list. An
+/// empty list means "nothing on today", and letting a refused permission say
+/// that is how a calendar card ends up quietly lying about a free afternoon.
+fn local_schedule(conn: &Connection) -> Result<serde_json::Value, ActionError> {
+    // First ask of all raises the macOS prompt. It is answered on the user's
+    // own time, so this call returns rather than blocking the action behind a
+    // dialog, and the next attempt finds the answer.
+    if !super::calendar_store::enabled() {
+        return Err(ActionError::Failed { detail: super::calendar_store::OFF.to_string() });
+    }
+    if super::calendar_store::access() == super::calendar_store::Access::NotDetermined {
+        super::calendar_store::request_access();
+        return Err(ActionError::Failed {
+            detail: "macOS is asking whether NEXUS may read your calendar. Allow it, then \
+                     ask again."
+                .to_string(),
+        });
+    }
+
+    let (from, to) = today_unix_bounds(conn);
+    let events = super::calendar_store::events_between(from, to).map_err(|why| {
+        ActionError::Failed {
+            detail: format!("{why} (Microsoft sign-in is also unavailable.)"),
+        }
+    })?;
+
+    let listed: Vec<serde_json::Value> = events
+        .iter()
+        .take(PAGE)
+        .map(|e| {
+            serde_json::json!({
+                "subject": e.title,
+                "start": local_clock(conn, e.start),
+                "endsAt": local_clock(conn, e.end),
+            })
+        })
+        .collect();
+
+    Ok(serde_json::json!({
+        "events": listed,
+        // Said outright so nobody has to guess why a meeting that is in
+        // Outlook on the web is missing here, or vice versa.
+        "source": "This Mac's calendar, not Microsoft Graph.",
+    }))
+}
+
 /// "14:30" out of Graph's timestamp, without parsing a full datetime.
 fn clock_of(stamp: &str) -> String {
     stamp
@@ -515,6 +601,14 @@ impl Connector for OutlookConnector {
             }
 
             "outlook.today_schedule" => {
+                // Graph is authoritative when it is available. When it is
+                // not, the same calendar is usually on this Mac already,
+                // and asking it costs no token and no consent. Same shape
+                // of answer either way, so `describe_result` and the cache
+                // do not need to know which one spoke.
+                if !is_signed_in(&cfg) {
+                    return local_schedule(ctx.conn);
+                }
                 let (start, end) = today_bounds(ctx.conn);
                 let value = graph_get(
                     &cfg,
@@ -681,6 +775,34 @@ mod tests {
             OutlookConnector.status(&conn),
             ConnectorStatus::Unconfigured
         );
+    }
+
+    #[test]
+    fn todays_window_is_local_midnight_to_local_midnight() {
+        // The bug this exists to prevent: dropping the 'utc' modifier makes
+        // SQLite read a local wall-clock string as if it were already UTC,
+        // so east of Greenwich the window starts hours into yesterday and
+        // "today's meetings" contains last night's.
+        let conn = Connection::open_in_memory().expect("memory db");
+        let (from, to) = today_unix_bounds(&conn);
+
+        assert_eq!(to - from, 86_400, "the window must be exactly one day");
+
+        let at: String = conn
+            .query_row(
+                "SELECT strftime('%H:%M', ?1, 'unixepoch', 'localtime')",
+                [from],
+                |r| r.get(0),
+            )
+            .expect("read back");
+        assert_eq!(at, "00:00", "the window must start at local midnight");
+
+        let now: i64 = conn
+            .query_row("SELECT strftime('%s','now')", [], |r| r.get::<_, String>(0))
+            .expect("now")
+            .parse()
+            .expect("epoch");
+        assert!(from <= now && now < to, "today must contain the present");
     }
 
     #[test]

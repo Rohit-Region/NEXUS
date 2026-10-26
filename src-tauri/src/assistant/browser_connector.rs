@@ -290,7 +290,7 @@ fn from_script_failure(stderr: &str) -> ActionError {
 const RECORD_SEP: char = '\u{1e}';
 const FIELD_SEP: char = '\u{1f}';
 
-fn list_tabs_script() -> Vec<&'static str> {
+pub fn list_tabs_script() -> Vec<&'static str> {
     vec![
         "set out to \"\"",
         "set fs to (character id 31)",
@@ -309,11 +309,15 @@ fn list_tabs_script() -> Vec<&'static str> {
 
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TabInfo {
-    window_index: u32,
-    tab_index: u32,
-    url: String,
-    title: String,
+pub struct TabInfo {
+    pub window_index: u32,
+    pub tab_index: u32,
+    pub url: String,
+    pub title: String,
+}
+
+pub fn parse_tab_listing(raw: &str) -> Vec<TabInfo> {
+    parse_tabs(raw)
 }
 
 fn parse_tabs(raw: &str) -> Vec<TabInfo> {

@@ -1,0 +1,85 @@
+/*
+ * The "being built" placeholder for a planned section. Centered, quiet, and
+ * honest: it names what is coming so the empty section reads as a roadmap.
+ */
+.soon {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: var(--space-lg);
+  width: 100%;
+}
+
+.soon__card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  max-width: 460px;
+  width: 100%;
+  margin-top: 6vh;
+  padding: var(--space-lg);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.soon__icon {
+  display: flex;
+  color: var(--color-accent);
+}
+
+.soon__title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.soon__blurb {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.soon__tag {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+  padding: 3px 8px;
+  border: 1px solid var(--color-accent-dim);
+  border-radius: 999px;
+}
+
+.soon__list {
+  list-style: none;
+  margin: var(--space-xs) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.soon__item {
+  position: relative;
+  padding-left: 16px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
+.soon__item::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 8px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--color-accent-dim);
+}

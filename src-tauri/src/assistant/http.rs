@@ -21,19 +21,26 @@ use std::time::Duration;
 use super::shell::{run_with_stdin, RunError};
 
 const CURL: &str = "/usr/bin/curl";
-const HTTP_TIMEOUT: Duration = Duration::from_secs(25);
-/// Curl's own deadline, slightly under ours so it reports rather than is killed.
-const CURL_MAX_TIME: &str = "20";
+/// The deadline for an ordinary request to a web service.
+const DEFAULT_MAX_TIME: Duration = Duration::from_secs(20);
+/// How much longer the process is allowed than curl's own deadline, so curl
+/// reports a timeout in words rather than being killed mid-request.
+const PROCESS_GRACE: Duration = Duration::from_secs(5);
 /// Longest body NEXUS will read. A connector answers questions; it does not
 /// mirror a service.
 const MAX_BODY: usize = 512 * 1024;
 /// Separates the body from the status line curl appends.
 const STATUS_MARKER: &str = "\u{1e}NEXUS-STATUS:";
+/// Separates the status code from the redirect target in that line.
+const REDIRECT_MARKER: char = '\u{1f}';
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Response {
     pub status: u16,
     pub body: String,
+    /// Where a redirect points, reported and never followed. A caller that
+    /// trusts a particular hop checks the target and makes that request itself.
+    pub redirect: Option<String>,
 }
 
 impl Response {
@@ -147,11 +154,43 @@ impl Request {
         self.basic_auth = Some((user.to_string(), secret.to_string()));
         self
     }
+
+    /// A POST with no default Accept header, so a plain-text service (ntfy)
+    /// is not sent `Accept: application/json` it has no reason to honour.
+    pub fn post(url: &str, body: String) -> Self {
+        Request {
+            method: "POST",
+            url: url.to_string(),
+            headers: Vec::new(),
+            basic_auth: None,
+            body: Some(body),
+        }
+    }
+
+    pub fn with_header(mut self, name: &str, value: &str) -> Self {
+        self.headers.push((name.to_string(), value.to_string()));
+        self
+    }
 }
 
-/// Send a request and read the response.
+/// Send a request and read the response, with the default deadline.
 pub fn send(request: Request) -> Result<Response, HttpError> {
-    let url = safe_https(&request.url)?;
+    send_with_timeout(request, DEFAULT_MAX_TIME)
+}
+
+/// Send a request with a caller-chosen deadline.
+///
+/// For the one caller that is legitimately slow: a model running on this
+/// laptop, which can take tens of seconds on a long answer. Everything else
+/// uses [`send`]. Before this existed the deadline was fixed at twenty seconds
+/// for every request, so the local model's own ninety-second budget was
+/// declared but never applied, and a slow answer was reported as "unreachable".
+pub fn send_with_timeout(request: Request, max_time: Duration) -> Result<Response, HttpError> {
+    // Checked by `safe_https`, but sent as written: its trailing-slash trim
+    // tidies a configured base address, and applied to a request it changes
+    // the address ("/feed/" and "/feed" are different pages on many sites).
+    safe_https(&request.url)?;
+    let url = request.url.trim().to_string();
 
     // Belt and braces: even though loopback is exempt from the TLS rule,
     // credentials must never travel unencrypted. A local model needs no
@@ -194,12 +233,14 @@ pub fn send(request: Request) -> Result<Response, HttpError> {
     // redirects is curl's default, so its absence is the desired behaviour:
     // an authenticated request must never be replayed to somewhere else.
     config.push_str("silent\nshow-error\nfail-with-body\n");
-    config.push_str(&format!("max-time = {CURL_MAX_TIME}\n"));
-    config.push_str(&format!("write-out = \"{STATUS_MARKER}%{{http_code}}\"\n"));
+    config.push_str(&format!("max-time = {}\n", max_time.as_secs().max(1)));
+    config.push_str(&format!(
+        "write-out = \"{STATUS_MARKER}%{{http_code}}{REDIRECT_MARKER}%{{redirect_url}}\"\n"
+    ));
 
     // argv carries no data at all: the entire request is on stdin.
-    let out =
-        run_with_stdin(CURL, &["--config", "-"], &config, HTTP_TIMEOUT).map_err(|e| match e {
+    let out = run_with_stdin(CURL, &["--config", "-"], &config, max_time + PROCESS_GRACE).map_err(
+        |e| match e {
             RunError::NotFound { .. } => HttpError::Unreachable {
                 detail: "curl is missing from this Mac, so NEXUS cannot make web requests."
                     .to_string(),
@@ -207,7 +248,8 @@ pub fn send(request: Request) -> Result<Response, HttpError> {
             other => HttpError::Unreachable {
                 detail: other.to_string(),
             },
-        })?;
+        },
+    )?;
 
     let raw = out.stdout;
     let (body, status_text) = match raw.rsplit_once(STATUS_MARKER) {
@@ -221,6 +263,12 @@ pub fn send(request: Request) -> Result<Response, HttpError> {
             return Err(HttpError::Unreachable { detail });
         }
     };
+
+    let (status_text, redirect) = match status_text.split_once(REDIRECT_MARKER) {
+        Some((code, target)) => (code, Some(target.trim()).filter(|t| !t.is_empty())),
+        None => (status_text, None),
+    };
+    let redirect = redirect.map(str::to_string);
 
     let status: u16 = status_text
         .trim()
@@ -257,7 +305,7 @@ pub fn send(request: Request) -> Result<Response, HttpError> {
         body.truncate(MAX_BODY);
     }
 
-    Ok(Response { status, body })
+    Ok(Response { status, body, redirect })
 }
 
 /// Read a secret from the macOS Keychain.
@@ -569,6 +617,17 @@ mod tests {
             production.contains("&[\"--config\", \"-\"]"),
             "argv must be exactly --config -"
         );
+    }
+
+    #[test]
+    fn a_request_keeps_its_trailing_slash() {
+        let production = include_str!("http.rs")
+            .split_once("#[cfg(test)]")
+            .map(|(before, _)| before)
+            .expect("test module marker");
+        let sender = production.split_once("pub fn send_with_timeout").expect("sender").1;
+        let body = &sender[..sender.find("\n}").expect("end")];
+        assert!(body.contains("request.url.trim().to_string()"), "the URL sent is the URL given");
     }
 
     #[test]

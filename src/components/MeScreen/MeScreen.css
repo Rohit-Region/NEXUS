@@ -1,0 +1,244 @@
+/*
+ * The Me screen: the personal profile. A calm, form-first layout, since this
+ * is somewhere you visit rarely and fill in once. Grouped cards, generous
+ * spacing, the accent reserved for the one status line.
+ */
+.me-screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  padding: var(--space-lg);
+  max-width: 820px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.me-screen__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-md);
+  color: var(--color-accent);
+}
+
+.me-screen__title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  letter-spacing: -0.01em;
+}
+
+.me-screen__subtitle {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.me-screen__status {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-accent);
+}
+
+.me-screen__groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.me-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.me-group__head {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.me-group__title {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-text-primary);
+}
+
+.me-group__blurb {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.me-group__fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--space-md);
+}
+
+.me-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.me-field__label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+}
+
+.me-field__input {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 8px 10px;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  resize: none;
+}
+
+.me-field__input:focus {
+  outline: none;
+  border-color: var(--color-accent-dim);
+}
+
+.me-field__input--area {
+  min-height: 72px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.me-field__input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.me-field__hint {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+/* A field that spans both columns when it is a prose box, so goals and about
+   get the full width to breathe. */
+.me-group__fields .me-field:has(.me-field__input--area) {
+  grid-column: 1 / -1;
+}
+
+/* Wellbeing settings: sentence-shaped rows, so each reads as what it does. */
+.well {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.well__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--color-text-primary);
+}
+
+.well__row input[type='checkbox'] {
+  accent-color: var(--color-accent);
+}
+
+.well__row--sub {
+  padding-left: 24px;
+  color: var(--color-text-secondary);
+}
+
+.well__text {
+  font-size: 13px;
+}
+
+.well__num {
+  width: 72px;
+  text-align: right;
+}
+
+.well__time {
+  width: 110px;
+}
+
+.me-group__title svg {
+  vertical-align: -1px;
+}
+
+/* Phone approvals. */
+.phone__test {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid var(--color-accent-dim);
+  border-radius: var(--radius-sm);
+  color: var(--color-accent);
+  cursor: pointer;
+}
+
+.phone__test:hover {
+  background: rgba(230, 57, 70, 0.1);
+}
+
+.phone__facts {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+
+/* Phone call alerts: the people to ring for, as removable chips. */
+.calls__people {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.calls__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  font-size: 12px;
+  color: var(--color-text-primary);
+}
+
+.calls__chip button {
+  display: inline-flex;
+  padding: 2px;
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.calls__input {
+  width: 150px;
+  padding: 4px 8px;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--color-text-primary);
+}

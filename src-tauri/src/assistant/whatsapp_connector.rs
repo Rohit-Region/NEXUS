@@ -141,6 +141,73 @@ fn installed() -> bool {
     std::path::Path::new(APP_PATH).exists()
 }
 
+/// How long to wait after opening a chat before pressing Return.
+///
+/// WhatsApp has to come to the front, switch to the chat for that number, and
+/// load the prefilled text. Press Return before that and it goes into a chat
+/// still loading, or an empty box. Generous on purpose: a late send is fine, a
+/// send into the wrong place is not.
+const SEND_SETTLE: std::time::Duration = std::time::Duration::from_millis(2800);
+
+/// Compose a message to a number and send it, without asking first.
+///
+/// The one path that sends unattended. It is reached only by the alert
+/// command, which supplies a number the user saved once as the destination for
+/// their own alerts; it is never reachable through `execute_action`, so NEXUS
+/// interpreting a sentence still goes through the two gated, confirmed steps.
+/// The target is an explicit international number the user set, not a contact
+/// name, so the chat is deterministic rather than resolved through the `@lid`
+/// guesswork that once sent to the wrong person. `press_send` still refuses
+/// unless WhatsApp is genuinely frontmost, so a mistimed Return lands nowhere
+/// rather than in another app.
+pub fn send_now(phone: &str, message: &str) -> Result<(), String> {
+    log::info!("whatsapp send_now: start, phone len {}", phone.len());
+    let phone = valid_phone(phone)
+        .ok_or_else(|| format!("\"{phone}\" is not an international phone number."))?;
+    let message = check_message(message).map_err(|e| e.to_string())?;
+    if !installed() {
+        log::warn!("whatsapp send_now: not installed at {APP_PATH}");
+        return Err("WhatsApp is not installed on this Mac.".to_string());
+    }
+
+    let url = format!(
+        "whatsapp://send?phone={}&text={}",
+        encode(&phone),
+        encode(&message)
+    );
+    // Two full attempts. `press_send` already fights for focus across six
+    // seconds, but on a loaded machine another app can win that whole round and
+    // leave the keystroke unsent. When it does, reopening the chat and trying
+    // once more is what turns an intermittent send into a reliable one: the
+    // reopen re-raises WhatsApp from a known state rather than retrying against
+    // whatever stole the front. A send that genuinely lands on the first pass
+    // never reaches the second, so this costs nothing in the common case.
+    let mut last: Result<(), String> = Err("WhatsApp was never reached.".to_string());
+    for attempt in 1..=2 {
+        log::info!("whatsapp send_now: opening chat (attempt {attempt})");
+        let out = run("/usr/bin/open", &[&url], DEFAULT_TIMEOUT).map_err(|e| e.to_string())?;
+        if !out.success {
+            log::warn!("whatsapp send_now: open failed: {}", out.stderr.trim());
+            last = Err("WhatsApp would not open.".to_string());
+            continue;
+        }
+        log::info!("whatsapp send_now: opened, settling then pressing send (attempt {attempt})");
+
+        std::thread::sleep(SEND_SETTLE);
+        match press_send() {
+            Ok(()) => {
+                log::info!("whatsapp send_now: sent on attempt {attempt}");
+                return Ok(());
+            }
+            Err(e) => {
+                log::warn!("whatsapp send_now: press_send failed on attempt {attempt}: {e}");
+                last = Err(e.to_string());
+            }
+        }
+    }
+    last
+}
+
 /// Press Return in WhatsApp, and only in WhatsApp.
 ///
 /// The activation, the focus check and the keystroke are one script on
@@ -164,17 +231,27 @@ fn installed() -> bool {
 ///
 /// Return rather than a click on the send button: locating the button needs
 /// the accessibility tree, and a wrong hit there presses something else.
-const PRESS_SEND: [&str; 9] = [
+const PRESS_SEND: [&str; 12] = [
+    // Raising a window is not instant, and another app can steal focus back in
+    // the gap. So this re-activates WhatsApp on every pass of the loop rather
+    // than once up front, which is what makes it win against an editor or a
+    // notification that keeps grabbing the front. Up to about six seconds,
+    // then it gives up rather than send blind.
+    "set n to \"\"",
+    "repeat 30 times",
     "tell application \"WhatsApp\" to activate",
-    // Raising a window is not instant. Without the wait the frontmost check
-    // reads the app that is on its way out and refuses a send that would
-    // have been fine a moment later.
-    "delay 0.4",
-    "tell application \"System Events\"",
-    "set n to name of first application process whose frontmost is true",
+    "delay 0.2",
+    "tell application \"System Events\" to set n to name of first application process whose frontmost is true",
+    "if n is \"WhatsApp\" then exit repeat",
+    "end repeat",
+    // Still not WhatsApp after the wait: refuse. A Return into whatever is in
+    // front is worse than a missed send, which is the whole reason this check
+    // exists.
     "if n is not \"WhatsApp\" then return \"not-front:\" & n",
-    "key code 36",
-    "end tell",
+    // A beat once it is genuinely frontmost, so the message box has keyboard
+    // focus before Return lands.
+    "delay 0.4",
+    "tell application \"System Events\" to key code 36",
     "delay 0.1",
     "return \"sent\"",
 ];

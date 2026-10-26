@@ -6,5 +6,9 @@
 	<string>NEXUS uses the microphone only for voice commands. Speech is recognised entirely on this Mac; audio is never recorded, saved, or sent anywhere.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>NEXUS uses on-device speech recognition to turn a spoken command into text. Nothing is sent to Apple or any other service, and transcripts are never saved.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>NEXUS reads your calendar to tell you what is coming up. It reads only; nothing is changed, and nothing leaves this Mac.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>NEXUS reads your calendar to tell you what is coming up. It reads only; nothing is changed, and nothing leaves this Mac.</string>
 </dict>
 </plist>

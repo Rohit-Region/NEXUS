@@ -1,0 +1,710 @@
+/*
+ * Stocks. Indices and breadth as a strip of cards, then one table that the
+ * tabs filter. Numbers are tabular so columns of percentages line up.
+ */
+.stocks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  max-width: 1040px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.stocks__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  color: var(--color-accent);
+}
+
+.stocks__headings {
+  flex: 1;
+}
+
+.stocks__title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.stocks__subtitle,
+.stocks__note,
+.stocks__status,
+.stocks__rule,
+.stocks__foot {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.stocks__status {
+  color: var(--color-accent);
+}
+
+.stocks__rule {
+  margin-top: calc(-1 * var(--space-sm));
+}
+
+.stocks__foot {
+  color: var(--color-text-muted);
+}
+
+.stocks__up {
+  color: #34d399;
+}
+
+.stocks__down {
+  color: #f87171;
+}
+
+.stocks__dim {
+  color: var(--color-text-muted);
+}
+
+.stocks__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.stocks__icon:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  border-color: var(--color-text-muted);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .stocks__icon--busy svg {
+    animation: stocks-spin 0.9s linear infinite;
+  }
+}
+
+@keyframes stocks-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.stocks__spark {
+  display: block;
+}
+
+.stocks__spark polyline {
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.stocks__spark--up {
+  stroke: #34d399;
+}
+
+.stocks__spark--down {
+  stroke: #f87171;
+}
+
+/* -- Indices and breadth -------------------------------------------------- */
+
+.stocks-indices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--space-sm);
+}
+
+.stocks-index {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-variant-numeric: tabular-nums;
+}
+
+.stocks-index__name {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+}
+
+.stocks-index__price {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.stocks-index__chg {
+  font-size: 12px;
+}
+
+.stocks-breadth {
+  display: flex;
+  height: 6px;
+  margin-top: auto;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--color-bg-tertiary);
+}
+
+.stocks-breadth__up {
+  background: #34d399;
+}
+
+.stocks-breadth__down {
+  background: #f87171;
+}
+
+/* -- Tabs ----------------------------------------------------------------- */
+
+.stocks-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.stocks-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.stocks-tab:hover {
+  color: var(--color-text-primary);
+}
+
+.stocks-tab--on {
+  background: var(--color-bg-tertiary);
+  border-color: var(--color-border);
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.stocks-tab__count {
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  font-size: 10px;
+}
+
+/* -- Table ---------------------------------------------------------------- */
+
+.stocks-table__wrap {
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.stocks-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.stocks-table th,
+.stocks-table td {
+  padding: 8px 10px;
+  text-align: right;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.stocks-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.stocks-table tbody tr:hover {
+  background: var(--color-bg-secondary);
+}
+
+.stocks-table th {
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+}
+
+.stocks-table .stocks-table__name {
+  text-align: left;
+}
+
+.stocks-table__sort {
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.stocks-table__sort:hover {
+  color: var(--color-text-primary);
+}
+
+.stocks-table__symbol {
+  display: block;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.stocks-table__long {
+  display: block;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.stocks-table__vol {
+  display: block;
+  font-size: 10px;
+  color: var(--color-accent);
+}
+
+/* -- Suggestions and Suits for you ---------------------------------------- */
+
+.stocks-tab--advice {
+  border-color: var(--color-border);
+}
+
+.stocks-tab--advice.stocks-tab--on {
+  border-color: var(--color-accent);
+}
+
+.picks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.picks__title {
+  margin: var(--space-sm) 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+}
+
+.picks__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--space-sm);
+}
+
+.pick {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: var(--space-md);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pick__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+}
+
+.pick__head > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.pick__symbol {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.pick__name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.pick__score {
+  min-width: 34px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: #34d399;
+}
+
+.pick__score--low {
+  color: #f87171;
+}
+
+.pick-verdict {
+  padding: 3px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pick-verdict--buy,
+.pick-verdict--top-pick {
+  background: rgba(52, 211, 153, 0.15);
+  color: #34d399;
+}
+
+.pick-verdict--accumulate,
+.pick-verdict--good {
+  background: rgba(52, 211, 153, 0.08);
+  color: #a7f3d0;
+}
+
+.pick-verdict--hold,
+.pick-verdict--average {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+}
+
+.pick-verdict--avoid,
+.pick-verdict--weak {
+  background: rgba(248, 113, 113, 0.12);
+  color: #f87171;
+}
+
+.pick__line,
+.pick__levels {
+  margin: 0;
+  color: var(--color-text-secondary);
+}
+
+.pick-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  line-height: 1.4;
+}
+
+.pick-notes li {
+  padding-left: 14px;
+  position: relative;
+}
+
+.pick-notes li::before {
+  position: absolute;
+  left: 0;
+}
+
+.pick-notes__for::before {
+  content: '+';
+  color: #34d399;
+}
+
+.pick-notes__against {
+  color: var(--color-text-secondary);
+}
+
+.pick-notes__against::before {
+  content: '!';
+  color: #f87171;
+}
+
+.pick__more {
+  align-self: flex-start;
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 11px;
+  color: var(--color-accent);
+  cursor: pointer;
+}
+
+.pick__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border);
+}
+
+.pick-factors {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pick-factors__row {
+  display: grid;
+  grid-template-columns: 120px 1fr 30px;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.pick-factors__track {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--color-bg-tertiary);
+  overflow: hidden;
+}
+
+.pick-factors__fill {
+  display: block;
+  height: 100%;
+  background: var(--color-accent);
+}
+
+.pick-factors__val {
+  text-align: right;
+  color: var(--color-text-secondary);
+}
+
+.pick-news {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 11px;
+}
+
+.pick-news__dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: middle;
+  background: var(--color-text-muted);
+}
+
+.pick-news__dot--up {
+  background: #34d399;
+}
+
+.pick-news__dot--down {
+  background: #f87171;
+}
+
+.pick-news__link {
+  display: inline;
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  text-align: left;
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.pick-news__link:hover {
+  text-decoration: underline;
+}
+
+.picks-avoid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.picks-avoid li {
+  display: grid;
+  grid-template-columns: 110px 40px 1fr;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.picks-avoid .pick__symbol {
+  font-size: 12px;
+}
+
+.fund-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin: 0;
+}
+
+.fund-stats div {
+  display: flex;
+  flex-direction: column;
+}
+
+.fund-stats dt {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+}
+
+.fund-stats dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.fund-budget {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm) var(--space-md);
+  padding: var(--space-md);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-accent-dim);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+}
+
+.fund-budget label {
+  font-weight: 600;
+}
+
+.fund-budget__input {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.fund-budget__input input {
+  width: 80px;
+  background: none;
+  border: none;
+  outline: none;
+  font: inherit;
+  color: var(--color-text-primary);
+}
+
+.fund-budget__plan {
+  flex-basis: 100%;
+  margin: 0;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.fund-budget__plan strong {
+  color: var(--color-text-primary);
+}
+
+/* -- Track record --------------------------------------------------------- */
+
+.track {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  font-size: 12px;
+}
+
+.track__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px var(--space-sm);
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  background: none;
+  border: none;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+
+.track__title {
+  font-weight: 600;
+}
+
+.track__toggle {
+  margin-left: auto;
+  color: var(--color-accent);
+}
+
+.track__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: 0 var(--space-md) var(--space-md);
+}
+
+.track__sub {
+  margin: var(--space-sm) 0 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.track-table {
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.track-table th,
+.track-table td {
+  padding: 4px 12px 4px 0;
+  text-align: left;
+  vertical-align: top;
+  font-weight: normal;
+  white-space: nowrap;
+}
+
+.track-table thead th {
+  color: var(--color-text-secondary);
+}
+
+.track-table__sub {
+  display: block;
+  font-size: 10px;
+  color: var(--color-text-secondary);
+}
+
+.track-skill {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 4px var(--space-md);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.track-skill li {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.track-skill li > span:first-child {
+  min-width: 90px;
+}

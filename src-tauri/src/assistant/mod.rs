@@ -12,36 +12,65 @@
 //! would leave the invariant unguarded. This module applies that reasoning to
 //! everything NEXUS can do.
 
+pub mod calendar_store;
+pub mod career;
+pub mod kai_connector;
+pub mod learn;
+pub mod market_connector;
+pub mod mf_connector;
+pub mod groww;
+pub mod pick_journal;
+pub mod fund_picks;
+pub mod stock_board;
+pub mod stock_picks;
+pub mod stock_watch;
 pub mod action;
 pub mod approval;
 pub mod claude_provider;
+pub mod clone;
 pub mod wa_contacts;
 pub mod audit;
+pub mod bills;
 pub mod browser_connector;
 pub mod calendar;
 pub mod cloud_provider;
 pub mod connector;
 pub mod context;
 pub mod converse;
+pub mod finance;
 pub mod github_connector;
 pub mod http;
 pub mod ide_connector;
 pub mod jira_browser;
 pub mod jira_connector;
 pub mod msgraph;
+pub mod news_connector;
+pub mod news_desk;
 pub mod nexus_connector;
+pub mod ntfy_connector;
 pub mod notification_connector;
 pub mod ollama_provider;
 pub mod outlook_connector;
 pub mod parametric;
 pub mod permission;
+pub mod phone_approval;
+pub mod phone_call;
+pub mod portfolio_chat;
 pub mod proactive;
+pub mod profile;
 pub mod reasoning;
 pub mod referent;
 pub mod session;
 pub mod shell;
+pub mod standup;
 pub mod suggestions;
+pub mod bank_sms;
+pub mod spend;
+pub mod spend_lock;
 pub mod system_connector;
+pub mod tailor;
+pub mod today;
+pub mod wellbeing;
 pub mod teams_connector;
 pub mod weather_connector;
 pub mod whatsapp_connector;
@@ -91,6 +120,7 @@ pub fn connectors() -> Vec<&'static dyn Connector> {
         &SystemConnector,
         &OutlookConnector,
         &NotificationConnector,
+        &kai_connector::KaiConnector,
     ]
 }
 

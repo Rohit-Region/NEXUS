@@ -49,7 +49,7 @@ const CANDIDATE_PATHS: [&str; 4] = [
 const REASON_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// The binary, if it is installed.
-fn binary() -> Option<&'static str> {
+pub(crate) fn binary() -> Option<&'static str> {
     CANDIDATE_PATHS
         .into_iter()
         .find(|path| std::path::Path::new(path).exists())

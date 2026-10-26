@@ -111,30 +111,63 @@ pub fn run_with_stdin_bytes(
         })?;
 
     if let Some(mut pipe) = child.stdin.take() {
-        // A write failure here usually means the child already exited; the
-        // wait below surfaces the real reason, so this one is not fatal.
-        let _ = pipe.write_all(stdin_data);
-        let _ = pipe.flush();
-        drop(pipe);
+        // Written on its own thread, not inline: a child that answers while
+        // still reading (cat, or anything echoing a large input) fills its
+        // stdout pipe, stops reading stdin, and an inline write_all would then
+        // block forever, with no deadline, before the wait below ever began.
+        // A write failure usually means the child already exited; the wait
+        // surfaces the real reason, so it is not fatal here.
+        let data = stdin_data.to_vec();
+        std::thread::spawn(move || {
+            let _ = pipe.write_all(&data);
+            let _ = pipe.flush();
+        });
     }
 
     wait_bounded(child, program, timeout)
 }
 
+/// Read a pipe to its end on a thread of its own.
+fn drain<R: std::io::Read + Send + 'static>(
+    pipe: Option<R>,
+) -> std::thread::JoinHandle<Vec<u8>> {
+    std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut p) = pipe {
+            let _ = p.read_to_end(&mut buf);
+        }
+        buf
+    })
+}
+
 /// Poll a child to completion or kill it at the deadline.
+///
+/// **Both pipes are drained while waiting, not after.** Reading only once the
+/// child had exited deadlocked any program whose output outgrew the pipe
+/// buffer (about 64 KB on macOS): the child blocked writing, never exited, and
+/// was killed at the deadline as if it had hung. That is how a 142 KB job feed
+/// and a fund's full NAV history both came back as "did not respond within 25
+/// seconds" while the same request from a terminal finished in a fraction of a
+/// second.
 fn wait_bounded(
     mut child: std::process::Child,
     program: &str,
     timeout: Duration,
 ) -> Result<Output, RunError> {
+    let stdout_reader = drain(child.stdout.take());
+    let stderr_reader = drain(child.stderr.take());
+
     let deadline = Instant::now() + timeout;
-    loop {
+    let status = loop {
         match child.try_wait() {
-            Ok(Some(_)) => break,
+            Ok(Some(status)) => break status,
             Ok(None) => {
                 if Instant::now() >= deadline {
                     let _ = child.kill();
                     let _ = child.wait();
+                    // The readers are left to finish on their own: if a
+                    // grandchild inherited a pipe, joining here could block
+                    // past the deadline this function exists to enforce.
                     return Err(RunError::TimedOut {
                         program: program.to_string(),
                         seconds: timeout.as_secs(),
@@ -143,22 +176,22 @@ fn wait_bounded(
                 std::thread::sleep(POLL);
             }
             Err(e) => {
+                let _ = child.kill();
                 return Err(RunError::Failed {
                     detail: format!("Lost track of {program}: {e}"),
-                })
+                });
             }
         }
-    }
+    };
 
-    let output = child.wait_with_output().map_err(|e| RunError::Failed {
-        detail: format!("Could not read output from {program}: {e}"),
-    })?;
+    let stdout = stdout_reader.join().unwrap_or_default();
+    let stderr = stderr_reader.join().unwrap_or_default();
 
     Ok(Output {
-        success: output.status.success(),
-        stdout: String::from_utf8_lossy(&output.stdout).trim().to_string(),
-        raw_stdout: output.stdout.clone(),
-        stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        success: status.success(),
+        stdout: String::from_utf8_lossy(&stdout).trim().to_string(),
+        stderr: String::from_utf8_lossy(&stderr).trim().to_string(),
+        raw_stdout: stdout,
     })
 }
 
@@ -168,8 +201,32 @@ fn wait_bounded(
 /// quoted or interpreted, which is what makes them safe to build from user
 /// input.
 pub fn run(program: &str, args: &[&str], timeout: Duration) -> Result<Output, RunError> {
-    let child = Command::new(program)
-        .args(args)
+    run_with_env(program, args, &[], timeout)
+}
+
+/// As `run`, with extra environment variables for the child only.
+///
+/// Exists for one reason: a credential that has to reach a subprocess. The
+/// environment is the least bad channel for that. `argv` is readable by every
+/// process on the machine through `ps`; a temporary file has to be created,
+/// chmodded and deleted, and survives a crash. A child's environment is
+/// readable only by the same user with a debugger attached, and it disappears
+/// when the process does.
+///
+/// It does not touch this process's own environment, so two concurrent calls
+/// cannot see each other's values.
+pub fn run_with_env(
+    program: &str,
+    args: &[&str],
+    env: &[(&str, &str)],
+    timeout: Duration,
+) -> Result<Output, RunError> {
+    let mut command = Command::new(program);
+    command.args(args);
+    for (name, value) in env {
+        command.env(name, value);
+    }
+    let child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -185,6 +242,53 @@ pub fn run(program: &str, args: &[&str], timeout: Duration) -> Result<Output, Ru
 
     // Killed rather than left behind at the deadline: an orphaned osascript
     // holding an Automation prompt would block every retry.
+    wait_bounded(child, program, timeout)
+}
+
+/// As `run_with_env`, inside a working directory and optionally with input on
+/// stdin.
+///
+/// For the task clone, whose editor and test runner must run *in* a scratch
+/// copy of a repository rather than wherever NEXUS was launched from. Same
+/// rules as everything else here: a fixed argument vector, never a shell, a
+/// hard deadline, and both pipes drained while waiting.
+pub fn run_in_dir(
+    program: &str,
+    args: &[&str],
+    dir: &std::path::Path,
+    env: &[(&str, &str)],
+    stdin_data: Option<&str>,
+    timeout: Duration,
+) -> Result<Output, RunError> {
+    use std::io::Write;
+
+    let mut command = Command::new(program);
+    command.args(args).current_dir(dir);
+    for (name, value) in env {
+        command.env(name, value);
+    }
+    let mut child = command
+        .stdin(if stdin_data.is_some() { Stdio::piped() } else { Stdio::null() })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => RunError::NotFound {
+                program: program.to_string(),
+            },
+            _ => RunError::Failed {
+                detail: format!("Could not start {program}: {e}"),
+            },
+        })?;
+
+    if let (Some(data), Some(mut pipe)) = (stdin_data, child.stdin.take()) {
+        // Its own thread, for the reason given in `run_with_stdin_bytes`.
+        let data = data.as_bytes().to_vec();
+        std::thread::spawn(move || {
+            let _ = pipe.write_all(&data);
+            let _ = pipe.flush();
+        });
+    }
     wait_bounded(child, program, timeout)
 }
 
@@ -216,6 +320,48 @@ pub fn osascript(lines: &[&str], args: &[&str]) -> Result<Output, RunError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn run_in_dir_runs_there_and_feeds_stdin() {
+        let dir = std::env::temp_dir();
+        let out = run_in_dir("/bin/pwd", &[], &dir, &[], None, Duration::from_secs(5)).expect("pwd");
+        let want = std::fs::canonicalize(&dir).unwrap();
+        assert_eq!(std::fs::canonicalize(out.stdout.trim()).unwrap(), want);
+        let echoed = run_in_dir("/bin/cat", &[], &dir, &[], Some("hello"), Duration::from_secs(5))
+            .expect("cat");
+        assert_eq!(echoed.stdout, "hello");
+    }
+
+    #[test]
+    fn output_larger_than_the_pipe_buffer_does_not_deadlock() {
+        // 300 KB is several times the ~64 KB pipe buffer. Before the pipes were
+        // drained concurrently, this blocked until the deadline and reported a
+        // timeout; it must now finish in well under a second.
+        let started = Instant::now();
+        let out = run(
+            "/usr/bin/head",
+            &["-c", "300000", "/dev/zero"],
+            Duration::from_secs(10),
+        )
+        .expect("head runs");
+        assert!(out.success);
+        assert_eq!(out.raw_stdout.len(), 300_000);
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "large output took {:?}; the pipe is not being drained",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn large_output_through_stdin_path_also_completes() {
+        // The same deadlock applied to run_with_stdin, which every web request
+        // goes through. cat echoes its 200 KB input straight back.
+        let input = "x".repeat(200_000);
+        let out = run_with_stdin("/bin/cat", &[], &input, Duration::from_secs(10))
+            .expect("cat runs");
+        assert_eq!(out.raw_stdout.len(), 200_000);
+    }
 
     #[test]
     fn a_program_that_does_not_exist_is_reported_as_missing() {

@@ -2,8 +2,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { RefreshCw, ShieldCheck } from 'lucide-react';
 import {
   listAudit,
-  listConnectors,
+  refreshConnectors,
+  connectorSecretPresent,
   setConnectorConfig,
+  storeConnectorSecret,
   setConnectorEnabled,
   setPermissionGrant,
 } from '../../lib/assistant';
@@ -71,8 +73,36 @@ function shortTime(stamp: string): string {
  */
 const CONFIG_FIELDS: Record<
   string,
-  Array<{ key: string; label: string; placeholder: string; hint: string }>
+  Array<{
+    key: string;
+    label: string;
+    placeholder: string;
+    hint: string;
+    /**
+     * A credential rather than a setting.
+     *
+     * These never go into `config_json`, which refuses secret-looking keys.
+     * They go to the Keychain through their own command, which is why they
+     * are marked here rather than being just another text field.
+     */
+    secret?: boolean;
+  }>
 > = {
+  github: [
+    {
+      key: 'accounts',
+      label: 'Work account',
+      placeholder: 'owner=login, e.g. acme=jane-at-acme',
+      hint: 'Which GitHub login can see which organisation. Needed only when one machine has two GitHub identities; without it NEXUS uses whichever account gh has active.',
+    },
+    {
+      key: 'token',
+      label: 'Token for that account',
+      placeholder: 'github_pat_...',
+      hint: 'A fine-grained token with read access to that organisation. Stored in the Keychain, never in the database. Leave blank to let gh supply it instead.',
+      secret: true,
+    },
+  ],
   jira: [
     {
       key: 'site',
@@ -89,6 +119,26 @@ const CONFIG_FIELDS: Record<
   ],
 };
 
+/**
+ * Render a stored config value back into the text the user typed.
+ *
+ * GitHub's mapping is stored as an object because that is the shape the
+ * connector reads, but it is *entered* as `owner=login`. Without this the
+ * field rendered blank whenever a mapping already existed, so it looked
+ * unset, and saving a token beside it failed with "fill in the account
+ * first" against an account that was in fact already configured.
+ */
+function asText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value && typeof value === 'object') {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([k, v]) => `${k}=${String(v)}`)
+      .join(', ');
+  }
+  return '';
+}
+
+
 export function PermissionsPanel() {
   const [connectors, setConnectors] = useState<ConnectorView[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
@@ -100,7 +150,7 @@ export function PermissionsPanel() {
     setLoading(true);
     setError(null);
     try {
-      const [rows, history] = await Promise.all([listConnectors(), listAudit(25)]);
+      const [rows, history] = await Promise.all([refreshConnectors(), listAudit(25)]);
       setConnectors(rows);
       setAudit(history);
     } catch (err) {
@@ -113,6 +163,26 @@ export function PermissionsPanel() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Asked once the connector list is in, because the account a credential is
+  // keyed by comes from that connector's own configuration.
+  useEffect(() => {
+    void (async () => {
+      const found: Record<string, boolean> = {};
+      for (const connector of connectors) {
+        if (!CONFIG_FIELDS[connector.id]?.some((f) => f.secret)) continue;
+        const account = secretAccount(connector, connector.config ?? {});
+        if (!account) continue;
+        try {
+          found[connector.id] = await connectorSecretPresent(connector.id, account);
+        } catch {
+          // Not knowing is the same as not showing a reassurance.
+        }
+      }
+      setHasSecret(found);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectors]);
 
   async function toggleGrant(
     connectorId: string,
@@ -132,21 +202,97 @@ export function PermissionsPanel() {
 
   /** Pending edits, keyed `connectorId.field`. Absent means unedited. */
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  /**
+   * Which connectors already hold a credential.
+   *
+   * Presence only. The value is never read back into the UI: a Settings
+   * screen that can display a stored token is a Settings screen that can
+   * leak one.
+   */
+  const [hasSecret, setHasSecret] = useState<Record<string, boolean>>({});
+
+  /**
+   * Which account a credential belongs to.
+   *
+   * For GitHub that is the login on the right of the `owner=login` mapping,
+   * because the token is that account's, not the organisation's. Everything
+   * else keys its credential by the configured email.
+   */
+  function secretAccount(
+    connector: ConnectorView,
+    values: Record<string, unknown>,
+  ): string {
+    if (connector.id === 'github') {
+      const mapping = values.accounts;
+      // Two shapes reach here: the `owner=login` text the user is typing,
+      // and the stored object it becomes. Both have to resolve to a login,
+      // or a saved credential could be keyed differently from a checked one.
+      if (typeof mapping === 'string') {
+        return mapping.split('=')[1]?.trim() ?? '';
+      }
+      if (mapping && typeof mapping === 'object') {
+        const first = Object.values(mapping as Record<string, unknown>)[0];
+        return typeof first === 'string' ? first.trim() : '';
+      }
+      return '';
+    }
+    return typeof values.email === 'string' ? values.email : '';
+  }
 
   async function saveConfig(connector: ConnectorView) {
     const fields = CONFIG_FIELDS[connector.id] ?? [];
     const next: Record<string, string> = {};
+    const values: Record<string, string> = {};
+    let secret = '';
+
     for (const field of fields) {
       const draft = drafts[`${connector.id}.${field.key}`];
-      const value = draft ?? connector.config?.[field.key] ?? '';
+      // Through `asText`, because a stored value is not always a string:
+      // GitHub's mapping is an object, and calling `.trim()` on it threw a
+      // TypeError that aborted the whole save. The display path was fixed
+      // and this one was not, so the field looked right and saving did
+      // nothing.
+      const value = draft ?? asText(connector.config?.[field.key]);
+      if (field.secret) {
+        // Deliberately not put in `next`: it must never reach config_json.
+        secret = value.trim();
+        continue;
+      }
+      values[field.key] = value.trim();
       // Empty values are dropped rather than stored: a blank string reads as
       // configured-but-wrong, and the connectors test for emptiness anyway.
       if (value.trim().length > 0) next[field.key] = value.trim();
+    }
+
+    // GitHub's mapping is entered as `owner=login` and stored as an object,
+    // because that is the shape the connector reads.
+    if (connector.id === 'github' && next.accounts) {
+      const [owner, login] = next.accounts.split('=').map((p) => p.trim());
+      if (!owner || !login) {
+        setError('Write the work account as owner=login.');
+        return;
+      }
+      delete next.accounts;
+      (next as Record<string, unknown>).accounts = { [owner]: login };
     }
     setBusy(true);
     setError(null);
     try {
       await setConnectorConfig(connector.id, next);
+      // The credential goes second and separately, so a rejected config
+      // never leaves a token stored against settings that were not saved.
+      if (secret.length > 0) {
+        // Falls back to what is already stored, so a token can be added or
+        // rotated without retyping the account it belongs to.
+        const account =
+          secretAccount(connector, values) ||
+          secretAccount(connector, connector.config ?? {});
+        if (!account) {
+          setError('Fill in the account first, so the credential has an owner.');
+          return;
+        }
+        await storeConnectorSecret(connector.id, account, secret);
+      }
       setDrafts((prev) => {
         const rest = { ...prev };
         for (const field of fields) delete rest[`${connector.id}.${field.key}`];
@@ -154,7 +300,9 @@ export function PermissionsPanel() {
       });
       await load();
     } catch (err) {
-      setError(String(err));
+      // Named with the connector, because this panel saves several and a
+      // bare message leaves the user guessing which one refused.
+      setError(`${connector.displayName}: ${String(err)}`);
     } finally {
       setBusy(false);
     }
@@ -262,11 +410,20 @@ export function PermissionsPanel() {
                       </span>
                       <input
                         className="nexus-input"
-                        type="text"
+                        /* A credential is masked and never prefilled: the
+                           stored value is not readable from here at all. */
+                        type={field.secret ? 'password' : 'text'}
                         spellCheck={false}
                         autoComplete="off"
-                        placeholder={field.placeholder}
-                        value={drafts[id] ?? connector.config?.[field.key] ?? ''}
+                        placeholder={
+                          field.secret && hasSecret[connector.id]
+                            ? 'stored; type to replace'
+                            : field.placeholder
+                        }
+                        value={
+                          drafts[id] ??
+                          (field.secret ? '' : asText(connector.config?.[field.key]))
+                        }
                         onChange={(e) =>
                           setDrafts((prev) => ({ ...prev, [id]: e.target.value }))
                         }

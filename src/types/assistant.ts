@@ -60,7 +60,11 @@ export interface ConnectorView {
    * the setter refuses any key that looks like a secret. Null when the
    * connector has never been configured.
    */
-  config: Record<string, string> | null;
+  /**
+   * Values are not all strings: GitHub's account mapping is an object. Typed
+   * as unknown so a consumer has to narrow rather than assume.
+   */
+  config: Record<string, unknown> | null;
 }
 
 export interface ActionRequest {

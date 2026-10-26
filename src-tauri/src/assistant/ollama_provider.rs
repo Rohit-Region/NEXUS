@@ -23,7 +23,7 @@ use std::time::Duration;
 
 use rusqlite::Connection;
 
-use super::http::{safe_https, send, HttpError, Request};
+use super::http::{safe_https, send, send_with_timeout, HttpError, Request};
 use super::permission::Reach;
 use super::reasoning::{
     AiContext, PlanStep, Purpose, Reasoning, ReasoningProvider, ReasoningUnavailable,
@@ -300,13 +300,16 @@ impl ReasoningProvider for OllamaProvider {
         })
         .to_string();
 
-        let response = send(Request {
-            method: "POST",
-            url: format!("{BASE_URL}/api/chat"),
-            headers: vec![("Content-Type".to_string(), "application/json".to_string())],
-            basic_auth: None,
-            body: Some(body),
-        })
+        let response = send_with_timeout(
+            Request {
+                method: "POST",
+                url: format!("{BASE_URL}/api/chat"),
+                headers: vec![("Content-Type".to_string(), "application/json".to_string())],
+                basic_auth: None,
+                body: Some(body),
+            },
+            REASON_TIMEOUT,
+        )
         .map_err(|e| match e {
             HttpError::Unreachable { .. } => ReasoningUnavailable::Unreachable {
                 detail: "Ollama is not running. Start it, or install it from ollama.com."
@@ -355,6 +358,92 @@ pub fn base_url_is_loopback() -> bool {
     safe_https(BASE_URL).is_ok() && BASE_URL.contains("127.0.0.1")
 }
 
+/// The instruction for writing content, as opposed to choosing actions.
+///
+/// `SYSTEM_PROMPT` frames the model as a planner that answers or proposes
+/// registered actions, and that framing is right for the assistant. It is wrong
+/// for writing study material: asked to "write a learning plan" or "create
+/// flashcards", a model under that prompt answers with a JSON plan of invented
+/// action ids, which NEXUS then correctly refuses. Content gets its own prompt
+/// and comes back as plain text.
+const WRITER_PROMPT: &str = "\
+You are a patient, accurate tutor inside NEXUS, a personal assistant. \
+Write exactly what is asked, as plain text. No JSON, no preamble such as \
+'Here is', no closing remarks. If you are not sure a fact is correct, say so \
+rather than guessing.";
+
+/// The configured local model's name, read once so a caller can release the
+/// database before the (slow) generation call.
+pub fn local_model(conn: &Connection) -> String {
+    model_name(conn)
+}
+
+/// Ask the local model to write text, and return it as written.
+///
+/// Local only: this talks to Ollama on loopback and nothing else, so it needs no
+/// external-reasoning permission. No actions can come of it; the result is text
+/// for the user to read. Takes the model name rather than a connection so no
+/// caller can hold the database lock across the call.
+pub fn generate_text(model: &str, prompt: &str) -> Result<String, String> {
+    // An explicit context window. Ollama's default is small, and when a prompt
+    // overflows it the start is silently discarded, which for a resume plus a
+    // job description is the resume. 8K tokens fits both with room to answer.
+    let body = serde_json::json!({
+        "model": model,
+        "stream": false,
+        "options": { "temperature": 0.3, "num_ctx": 8192 },
+        "messages": [
+            { "role": "system", "content": WRITER_PROMPT },
+            { "role": "user", "content": prompt }
+        ]
+    })
+    .to_string();
+
+    let response = send_with_timeout(
+        Request {
+            method: "POST",
+            url: format!("{BASE_URL}/api/chat"),
+            headers: vec![("Content-Type".to_string(), "application/json".to_string())],
+            basic_auth: None,
+            body: Some(body),
+        },
+        REASON_TIMEOUT,
+    )
+    .map_err(|e| match e {
+        HttpError::Unreachable { .. } => {
+            "Ollama is not running. Start it with `brew services start ollama`.".to_string()
+        }
+        other => other.to_string(),
+    })?;
+
+    if !response.ok() {
+        return Err(if response.status == 404 {
+            format!("Ollama does not have the model \"{model}\". Pull it with: ollama pull {model}")
+        } else {
+            format!("Ollama returned {}.", response.status)
+        });
+    }
+
+    let content = serde_json::from_str::<serde_json::Value>(&response.body)
+        .ok()
+        .and_then(|v| {
+            v.get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_str())
+                .map(String::from)
+        })
+        .ok_or("Ollama returned something NEXUS could not read.")?;
+
+    // Models sometimes fence plain text in ``` anyway; the fence is noise.
+    let trimmed = content.trim();
+    let unfenced = trimmed
+        .strip_prefix("```")
+        .map(|rest| rest.split_once('\n').map(|(_, body)| body).unwrap_or(rest))
+        .and_then(|rest| rest.trim_end().strip_suffix("```"))
+        .unwrap_or(trimmed);
+    Ok(unfenced.trim().to_string())
+}
+
 /// How long a local model is given to think.
 ///
 /// A model on a laptop is not fast. Documented here because it is part of the
@@ -368,6 +457,22 @@ pub fn reason_timeout() -> Duration {
 mod tests {
     use super::*;
     use crate::db::migrations::MIGRATIONS;
+
+    #[test]
+    fn every_model_call_applies_the_declared_timeout() {
+        // REASON_TIMEOUT was once declared and documented but never passed to
+        // the transport, so every local-model call was silently cut at the
+        // default twenty seconds. A model call must carry its own deadline.
+        let production = include_str!("ollama_provider.rs")
+            .split_once("#[cfg(test)]")
+            .map(|(before, _)| before)
+            .expect("marker");
+        assert!(
+            !production.contains("= send(Request"),
+            "a model call uses the default deadline instead of REASON_TIMEOUT"
+        );
+        assert_eq!(production.matches("REASON_TIMEOUT,").count(), 2);
+    }
 
     fn test_conn() -> Connection {
         let conn = Connection::open_in_memory().expect("open");

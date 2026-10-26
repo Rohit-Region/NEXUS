@@ -48,6 +48,8 @@ interface AssistantPanelProps {
    * input, which is what makes voice and text one conversation rather than
    * two.
    */
+  /** A one-off line to lead with when opened by a gesture. */
+  greeting?: string | null;
   spokenText?: string | null;
   onSpokenConsumed: () => void;
   /**
@@ -158,6 +160,7 @@ export function AssistantPanel({
   voiceEnabled,
   voiceActive,
   onVoiceToggle,
+  greeting,
   spokenText,
   onSpokenConsumed,
   onExpectAnswer,
@@ -560,7 +563,11 @@ export function AssistantPanel({
       </header>
 
       <div className="assistant-panel__log" ref={logRef}>
-        {turns.length === 0 && !reply && (
+        {turns.length === 0 && !reply && greeting && (
+          <p className="assistant-panel__greeting">{greeting}</p>
+        )}
+
+        {turns.length === 0 && !reply && !greeting && (
           <p className="assistant-panel__empty">
             Ask NEXUS to open something, or what your blocked tasks are. It
             answers from your workspace and runs commands through the same

@@ -9,6 +9,13 @@ interface Props {
   summary: WorkspaceSummary | null;
   /** Where a ring or node should take the user when pressed. */
   navigate?: (screen: 'overview' | 'projects' | 'registry' | 'settings') => void;
+  /**
+   * Pressing the core. It replays the boot sequence, refreshes everything on
+   * the screen, and when the animation finishes asks how it can help. The
+   * refresh is the real work; the animation is the acknowledgement that the
+   * press did something.
+   */
+  onActivate?: () => void;
 }
 
 const REFRESH_MS = 8000;
@@ -62,7 +69,7 @@ function countdown(seconds: number): string {
  * application already holds, because a dial that moves for effect is worse
  * than no dial: it teaches you to ignore the ones that mean something.
  */
-export function CoreHud({ summary, navigate }: Props) {
+export function CoreHud({ summary, navigate, onActivate }: Props) {
   // Drawn once on mount, then never again. A boot sequence that replays on
   // every re-render is a distraction; one that plays when the application
   // starts is the machine coming up.
@@ -71,6 +78,18 @@ export function CoreHud({ summary, navigate }: Props) {
     const timer = window.setTimeout(() => setBooted(true), 40);
     return () => window.clearTimeout(timer);
   }, []);
+
+  // A press replays the rings and locks out a second press until they have
+  // finished drawing, so the gesture cannot stack on itself.
+  const [pulsing, setPulsing] = useState(false);
+  const activate = () => {
+    if (pulsing) return;
+    setPulsing(true);
+    onActivate?.();
+    // Matches the ring redraw in the stylesheet; after it, the pulse class is
+    // dropped so the next press can play it again.
+    window.setTimeout(() => setPulsing(false), 1900);
+  };
 
   const [connectors, setConnectors] = useState<ConnectorView[]>([]);
   const [commitments, setCommitments] = useState<Commitment[]>([]);
@@ -129,8 +148,13 @@ export function CoreHud({ summary, navigate }: Props) {
   const unhappy = connectors.filter((c) => DEGRADED.includes(c.status)).length;
 
   return (
-    <div className={`hud${booted ? ' hud--booted' : ''}`}>
-      <div className="hud__core">
+    <div className={`hud${booted ? ' hud--booted' : ''}${pulsing ? ' hud--pulsing' : ''}`}>
+      <button
+        type="button"
+        className="hud__core"
+        onClick={activate}
+        aria-label="Refresh everything and ask NEXUS"
+      >
         <svg
           className="hud__rings"
           width={SIZE}
@@ -257,7 +281,7 @@ export function CoreHud({ summary, navigate }: Props) {
             <span className="hud__next hud__next--idle">nothing scheduled</span>
           )}
         </div>
-      </div>
+      </button>
 
       {/* Not decoration: three unlabelled arcs are a puzzle. */}
       <dl className="hud__legend">

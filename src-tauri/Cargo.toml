@@ -34,7 +34,23 @@ objc2-avf-audio = { version = "0.3.2", features = [
     "AVSpeechSynthesis",
 ] }
 objc2-foundation = "0.3.2"
+# NEXUS: the local calendar, explicitly approved.
+#
+# EventKit rather than scripting Calendar.app, for one reason: AppleScript
+# hands back a recurring meeting's series master with its RRULE, not the
+# occurrence you asked about. On a work calendar most events recur, so a
+# "today" built that way is mostly wrong dates. `eventsMatchingPredicate`
+# returns expanded occurrences and handles EXDATE, edited single
+# occurrences, time zones and DST, none of which is worth reimplementing.
+objc2-event-kit = { version = "0.3.2", features = [
+    "EKEventStore", "EKEvent", "EKCalendarItem", "EKCalendar",
+    "EKTypes", "EKParticipant", "EKStructuredLocation", "EKObject",
+    "block2",
+] }
 objc2-speech = "0.3.2"
+# The Spending lock: Touch ID, with the Mac login password as macOS's own
+# fallback. Only `evaluatePolicy` is used; nothing is enrolled or stored.
+objc2-local-authentication = { version = "0.3.2", features = ["LAContext", "LAError", "LABiometryType", "block2"] }
 block2 = "0.6"
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }

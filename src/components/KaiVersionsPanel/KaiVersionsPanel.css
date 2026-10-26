@@ -1,0 +1,294 @@
+/*
+ * The service-versions card.
+ *
+ * Sixth card, and it takes the one region of the wheel still free: green is
+ * tasks, so this is a colder teal-to-slate, the colour of a terminal readout
+ * rather than a status. Its device is the dotted leader between a service and
+ * its version, the way a deployment manifest or a table of contents aligns a
+ * name to the number that belongs to it.
+ */
+.kai {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  background:
+    linear-gradient(
+      150deg,
+      rgba(45, 212, 191, 0.06) 0%,
+      rgba(45, 212, 191, 0.015) 30%,
+      var(--color-bg-secondary) 55%
+    );
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.kai__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: var(--space-xs);
+  border-bottom: 1px solid var(--color-border);
+  color: #2dd4bf;
+}
+
+.kai__title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.kai__count {
+  flex: 1;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The environment switch. A row of chips, the selected one filled, because
+   these versions mean nothing until you know which deployment they describe,
+   and switching between a few is the common move. */
+.kai__envs {
+  display: flex;
+  gap: var(--space-xs);
+  flex-wrap: wrap;
+}
+
+.kai__env {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.kai__env:hover {
+  color: #2dd4bf;
+  border-color: rgba(45, 212, 191, 0.45);
+}
+
+.kai__env--on {
+  color: var(--color-bg-primary);
+  background: #2dd4bf;
+  border-color: #2dd4bf;
+}
+
+.kai__refresh {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.kai__refresh:hover:not(:disabled) {
+  color: #2dd4bf;
+  border-color: rgba(45, 212, 191, 0.45);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .kai__refresh--busy {
+    animation: kai-spin 0.9s linear infinite;
+  }
+}
+
+@keyframes kai-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* The card exists to show either versions or the one reason there are none,
+   so the error is not a muted aside: it is the content. Accent, because it is
+   almost always "open the tab", which is a thing to do. */
+.kai__error {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-accent);
+}
+
+.kai__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.kai__row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  padding: 4px var(--space-sm);
+  border-radius: var(--radius-sm);
+}
+
+.kai__row:hover {
+  background-color: var(--color-bg-tertiary);
+}
+
+.kai__service {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The leader. A dotted rule that grows to fill the gap, so the eye tracks
+   from a service to its own version and not the one on the row below. */
+.kai__dots {
+  flex: 1 1 auto;
+  min-width: var(--space-md);
+  align-self: center;
+  height: 0;
+  border-bottom: 1px dotted var(--color-border);
+  transform: translateY(-1px);
+}
+
+.kai__version {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: #2dd4bf;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+/* When the page is not readable yet, the remedy is a button that opens it for
+   SSO, not an instruction. */
+.kai__needs {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-sm);
+}
+
+.kai__open {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 6px 14px;
+  background: transparent;
+  border: 1px solid rgba(45, 212, 191, 0.5);
+  border-radius: var(--radius-sm);
+  color: #2dd4bf;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.kai__open:hover {
+  background-color: rgba(45, 212, 191, 0.12);
+  border-color: #2dd4bf;
+}
+
+/* The GitHub-built repos. A labelled group under the service versions, set off
+   by a top rule so it reads as a second kind of thing: a build run, not a
+   deployed version. */
+.kai__builds {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-top: var(--space-xs);
+  margin-top: var(--space-xs);
+  border-top: 1px solid var(--color-border);
+}
+
+.kai__builds-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  padding: 0 var(--space-sm) 2px;
+}
+
+/* The whole row is the link to its run, so the hit target is the row, not a
+   word in it. Laid out like a version row so the two groups align. */
+.kai__build-open {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  width: 100%;
+  padding: 4px var(--space-sm);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+}
+
+.kai__build-open:hover {
+  background-color: var(--color-bg-tertiary);
+}
+
+.kai__build .kai__service {
+  color: var(--color-text-primary);
+}
+
+/* The branch the run was on, in the right-hand slot where the version sits.
+   Teal, the card's own accent, the same colour as a deployed service version
+   above, so the right-hand column reads as one consistent thing. */
+.kai__build-branch {
+  color: #2dd4bf;
+  font-weight: 600;
+}
+
+/* Status moves to the middle slot in grey: still legible, but it is no longer
+   the loudest thing in the row. A failure keeps the danger colour so a broken
+   build still stands out at a glance. */
+.kai__build-status {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kai__build-status--fail {
+  color: var(--color-danger, #f87171);
+}
+
+.kai__build-open .lucide {
+  flex: 0 0 auto;
+  align-self: center;
+  color: var(--color-text-muted);
+}
+
+.kai__build-open:hover .lucide {
+  color: #2dd4bf;
+}

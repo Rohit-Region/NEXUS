@@ -1264,7 +1264,14 @@ pub fn respond_to(
     project_names: &[String],
     deliberate: bool,
 ) -> Response {
-    let mut response = resolve_to(text, conn, snapshot, commands, project_names, deliberate);
+    // While NEXUS is waiting on the answer to its own question, the reply is
+    // not sent to a model. "Yes", "no" and real commands still resolve through
+    // the deterministic rungs; anything else falls through to the re-ask below.
+    // Without this, a misheard answer reached the model the moment one was
+    // installed: it invented an action, NEXUS refused it, the user was told
+    // "the reasoning provider proposed nav-settings", and the offer was lost.
+    let may_ask_model = deliberate && snapshot.pending_follow_up.is_none();
+    let mut response = resolve_to(text, conn, snapshot, commands, project_names, may_ask_model);
 
     // A question NEXUS asked deserves an ending, even when the answer was
     // not understood.
@@ -3798,15 +3805,29 @@ mod tests {
             &registry(),
             &[],
         );
+        // A third machine is also correct: one with a local model running.
+        // Local reasoning needs no permission, so the ladder ends in a real
+        // answer there. That outcome is only acceptable when such a model is
+        // actually reachable; anywhere else an answer means something
+        // escalated that should not have.
+        let local_model = matches!(
+            super::super::reasoning::best_provider(&conn),
+            Ok(provider) if provider.id() == super::super::ollama_provider::PROVIDER_ID
+        );
         match &reply.reply {
             AssistantReply::Unresolved { reason, .. } => {
                 assert!(
                     reason.contains("reasoning provider")
-                        || reason.contains("External AI reasoning is turned off"),
+                        || reason.contains("External AI reasoning is turned off")
+                        || (local_model && reason.to_lowercase().contains("ollama")),
                     "the refusal should say what is missing: {reason}"
                 );
             }
-            other => panic!("expected a refusal, got {other:?}"),
+            AssistantReply::Answer { .. } => assert!(
+                local_model,
+                "an answer arrived with no local model to have given it"
+            ),
+            other => panic!("expected a refusal or a local answer, got {other:?}"),
         }
     }
 

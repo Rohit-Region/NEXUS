@@ -33,6 +33,7 @@ pub fn run() {
 
             // Initialize the SQLite database and register it as managed state.
             let conn = db::init(app.handle()).expect("Failed to initialize NEXUS database");
+            commands::load_calendar_switch(&conn);
             app.manage(DbState(Mutex::new(conn)));
 
             // NEXUS-012: pending approvals live here and nowhere else.
@@ -89,6 +90,81 @@ pub fn run() {
                 });
             }
 
+            // Phone approvals: reads the private reply topic for Approve /
+            // Deny taps, but only while a request is actually waiting, so an
+            // idle NEXUS makes no requests at all. The cursor starts at the
+            // moment NEXUS started, so taps from before a restart are never
+            // acted on.
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    let mut cursor = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs().to_string())
+                        .unwrap_or_else(|_| "1m".to_string());
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_secs(5));
+                        if !assistant::phone_approval::any_waiting() {
+                            continue;
+                        }
+                        let Some(db) = handle.try_state::<DbState>() else {
+                            continue;
+                        };
+                        commands::phone_poll_once(&handle, &db, &mut cursor);
+                    }
+                });
+            }
+
+            // Wellbeing nudges. A thread of its own, like the watcher above,
+            // so breaks are counted whichever screen is open. It wakes once a
+            // minute, takes the database lock only to read settings and the
+            // local clock, and posts a macOS notification when one is due.
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || loop {
+                    std::thread::sleep(std::time::Duration::from_secs(60));
+                    let Some(db) = handle.try_state::<DbState>() else {
+                        continue;
+                    };
+                    for nudge in commands::wellbeing_tick(&db) {
+                        let _ = commands::nexus_desktop_notification(
+                            nudge.title().to_string(),
+                            nudge.body(),
+                        );
+                    }
+                });
+            }
+
+            // Phone call alerts: ring the phone for a meeting about to
+            // start, a message from a chosen person, or a reminder due now.
+            // Does nothing until switched on in Me.
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || loop {
+                    std::thread::sleep(commands::phone_calls::TICK);
+                    if let Some(db) = handle.try_state::<DbState>() {
+                        commands::phone_calls::tick(&db);
+                    }
+                });
+            }
+
+            // Spending: pull new bank SMS from the user's Sheet every five
+            // minutes, so the Spending tab is current without a press of
+            // Sync. Does nothing until the Sheet is connected, and a failure
+            // is recorded for the tab to show rather than retried in a loop.
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(20));
+                    loop {
+                        if let Some(db) = handle.try_state::<DbState>() {
+                            let _ = commands::spending::sync_once(&db);
+                        }
+                        std::thread::sleep(std::time::Duration::from_secs(300));
+                    }
+                });
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -135,6 +211,10 @@ pub fn run() {
             commands::nexus_set_permission_grant,
             commands::nexus_set_connector_enabled,
             commands::nexus_set_connector_config,
+            commands::nexus_store_connector_secret,
+            commands::nexus_connector_secret_present,
+            commands::nexus_vault_set,
+            commands::nexus_vault_status,
             commands::nexus_list_contacts,
             commands::nexus_save_contact,
             commands::nexus_delete_contact,
@@ -156,6 +236,7 @@ pub fn run() {
             commands::nexus_list_commitments,
             commands::nexus_delete_commitment,
             commands::nexus_create_commitment,
+            commands::nexus_defer_commitment,
             commands::nexus_accept_suggestion,
             commands::nexus_proactive_policy,
             commands::nexus_set_proactive_policy,
@@ -168,6 +249,107 @@ pub fn run() {
             commands::nexus_assistant_ask,
             commands::nexus_set_user_name,
             commands::nexus_user_name,
+            commands::nexus_check_stock,
+            commands::nexus_request_calendar_access,
+            commands::nexus_calendar_enabled,
+            commands::news::nexus_news_desk,
+            commands::news::nexus_news_settings,
+            commands::news::nexus_set_news_settings,
+            commands::stocks::nexus_stock_board,
+            commands::stocks::nexus_stock_picks,
+            commands::stocks::nexus_fund_picks,
+            commands::stocks::nexus_pick_track_record,
+            commands::portfolio_chat::nexus_portfolio_chat,
+            commands::portfolio_chat::nexus_portfolio_chat_apply,
+            commands::phone_calls::nexus_call_settings,
+            commands::phone_calls::nexus_set_call_settings,
+            commands::phone_calls::nexus_call_test,
+            commands::spending::nexus_spend_status,
+            commands::spending::nexus_spend_lock_state,
+            commands::spending::nexus_spend_unlock,
+            commands::spending::nexus_spend_lock,
+            commands::spending::nexus_spend_connect,
+            commands::spending::nexus_spend_disconnect,
+            commands::spending::nexus_spend_sync,
+            commands::spending::nexus_spend_paste,
+            commands::spending::nexus_spend_month,
+            commands::spending::nexus_spend_add,
+            commands::spending::nexus_spend_update,
+            commands::spending::nexus_spend_delete,
+            commands::spending::nexus_spend_set_budget,
+            commands::spending::nexus_spend_set_income,
+            commands::spending::nexus_spend_set_balance,
+            commands::spending::nexus_spend_review,
+            commands::spending::nexus_spend_accept,
+            commands::spending::nexus_spend_ignore,
+            commands::nexus_set_calendar_enabled,
+            commands::nexus_open_url,
+            commands::nexus_desktop_notification,
+            commands::nexus_set_whatsapp_alert_number,
+            commands::nexus_whatsapp_alert_number,
+            commands::nexus_whatsapp_send_alert,
+            commands::nexus_set_ntfy_topic,
+            commands::nexus_ntfy_topic,
+            commands::nexus_ntfy_send_alert,
+            commands::nexus_set_keep_awake,
+            commands::nexus_fetch_news,
+            commands::nexus_news_briefing,
+            commands::nexus_get_profile,
+            commands::nexus_set_profile_field,
+            commands::nexus_add_holding,
+            commands::nexus_remove_holding,
+            commands::nexus_portfolio,
+            commands::nexus_search_funds,
+            commands::nexus_list_goals,
+            commands::nexus_add_goal,
+            commands::nexus_update_goal_amount,
+            commands::nexus_remove_goal,
+            commands::nexus_retirement_projection,
+            commands::nexus_list_bills,
+            commands::nexus_add_bill,
+            commands::nexus_remove_bill,
+            commands::nexus_tax_dates,
+            commands::nexus_list_skills,
+            commands::nexus_add_skill,
+            commands::nexus_remove_skill,
+            commands::nexus_skill_topics,
+            commands::nexus_generate_plan,
+            commands::nexus_set_topic_done,
+            commands::nexus_explain_topic,
+            commands::nexus_generate_cards,
+            commands::nexus_due_cards,
+            commands::nexus_review_card,
+            commands::nexus_learn_stats,
+            commands::nexus_discover_jobs,
+            commands::nexus_list_applications,
+            commands::nexus_add_application,
+            commands::nexus_update_application,
+            commands::nexus_remove_application,
+            commands::nexus_get_document,
+            commands::nexus_set_document,
+            commands::nexus_set_application_description,
+            commands::nexus_tailor_resume,
+            commands::nexus_cover_letter,
+            commands::nexus_export_application_doc,
+            commands::nexus_today,
+            commands::nexus_compose_standup,
+            commands::nexus_clone_projects,
+            commands::nexus_set_clone_allowed,
+            commands::nexus_clone_runs,
+            commands::nexus_clone_start,
+            commands::nexus_clone_apply,
+            commands::nexus_clone_discard,
+            commands::nexus_phone_approvals,
+            commands::nexus_set_phone_approvals,
+            commands::nexus_phone_approval_test,
+            commands::nexus_wellbeing_settings,
+            commands::nexus_set_wellbeing_settings,
+            commands::nexus_wellbeing_status,
+            commands::nexus_role_brief,
+            commands::nexus_interview_questions,
+            commands::nexus_generate_interview_questions,
+            commands::nexus_interview_feedback,
+            commands::nexus_delete_interview_question,
             commands::nexus_assistant_cancel_turn,
         ])
         .run(tauri::generate_context!())

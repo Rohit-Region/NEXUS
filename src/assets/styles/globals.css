@@ -368,3 +368,48 @@ button.nexus-status-pill:disabled {
 .nexus-no-results .nexus-btn {
   margin-top: var(--space-sm);
 }
+
+/* ============================================================
+   Boot screen: shown while the first settings read is in flight.
+   Deliberately not empty; an empty div is indistinguishable from
+   a dead webview, which is the bug this replaced.
+   ============================================================ */
+.app-boot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  height: 100%;
+  width: 100%;
+  background-color: var(--color-bg-primary);
+}
+
+.app-boot__mark {
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--color-accent);
+}
+
+.app-boot__word {
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  color: var(--color-text-primary);
+}
+
+.app-boot__x {
+  color: var(--color-accent);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .app-boot {
+    animation: app-boot-pulse 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes app-boot-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}

@@ -1,16 +1,23 @@
 import { useEffect, useState } from 'react';
 import {
   Activity,
+  Bot,
+  Briefcase,
   CalendarDays,
   FolderKanban,
+  GraduationCap,
   Home,
   KeyRound,
   LayoutGrid,
   Lightbulb,
   ListTodo,
+  Newspaper,
   Radar,
   Settings as SettingsIcon,
   Sparkles,
+  TrendingUp,
+  UserRound,
+  Wallet,
 } from 'lucide-react';
 import { listConnectors } from '../../lib/assistant';
 import type { ConnectorStatus, ConnectorView } from '../../types/assistant';
@@ -22,11 +29,23 @@ interface Props {
   navigate: (next: NexusView) => void;
   onOpenAssistant: () => void;
   suggestionCount: number;
+  /** Connector ids whose card is currently showing on the Overview. */
+  openConnectors: string[];
+  onToggleConnector: (id: string) => void;
 }
 
 const REFRESH_MS = 8000;
 /** Connectors listed by name. The rest are behind "View all". */
 const PINNED = 6;
+
+/**
+ * Connectors that have a card on the Overview to show.
+ *
+ * Only these rows are pressable. The rest are status readouts and nothing
+ * else, and making them all look clickable would promise a panel that does
+ * not exist behind five of the six.
+ */
+const HAS_PANEL = new Set(['weather']);
 
 /** How a connector's own status renders as a dot. */
 function dotOf(status: ConnectorStatus): 'ok' | 'warn' | 'off' {
@@ -48,7 +67,14 @@ function dotOf(status: ConnectorStatus): 'ok' | 'warn' | 'off' {
  * each connector's own `status()`, refreshed on the same cadence as the
  * assistant's watcher.
  */
-export function Sidebar({ view, navigate, onOpenAssistant, suggestionCount }: Props) {
+export function Sidebar({
+  view,
+  navigate,
+  onOpenAssistant,
+  suggestionCount,
+  openConnectors,
+  onToggleConnector,
+}: Props) {
   const [connectors, setConnectors] = useState<ConnectorView[]>([]);
   const [showAll, setShowAll] = useState(false);
 
@@ -126,6 +152,26 @@ export function Sidebar({ view, navigate, onOpenAssistant, suggestionCount }: Pr
           navigate({ screen: 'overview' }),
         )}
 
+        <p className="rail__group">Life</p>
+        {item('Me', <UserRound size={15} strokeWidth={1.8} />, view.screen === 'me', () =>
+          navigate({ screen: 'me' }),
+        )}
+        {item('Money', <Wallet size={15} strokeWidth={1.8} />, view.screen === 'money', () =>
+          navigate({ screen: 'money' }),
+        )}
+        {item('Stocks', <TrendingUp size={15} strokeWidth={1.8} />, view.screen === 'stocks', () =>
+          navigate({ screen: 'stocks' }),
+        )}
+        {item('Career', <Briefcase size={15} strokeWidth={1.8} />, view.screen === 'career', () =>
+          navigate({ screen: 'career' }),
+        )}
+        {item('Learn', <GraduationCap size={15} strokeWidth={1.8} />, view.screen === 'learn', () =>
+          navigate({ screen: 'learn' }),
+        )}
+        {item('News', <Newspaper size={15} strokeWidth={1.8} />, view.screen === 'news', () =>
+          navigate({ screen: 'news' }),
+        )}
+
         <p className="rail__group">Work</p>
         {item(
           'Projects',
@@ -135,6 +181,9 @@ export function Sidebar({ view, navigate, onOpenAssistant, suggestionCount }: Pr
         )}
         {item('Tasks', <ListTodo size={15} strokeWidth={1.8} />, false, () =>
           navigate({ screen: 'projects' }),
+        )}
+        {item('Clone', <Bot size={15} strokeWidth={1.8} />, view.screen === 'clone', () =>
+          navigate({ screen: 'clone' }),
         )}
 
         <p className="rail__group">Intelligence</p>
@@ -156,15 +205,42 @@ export function Sidebar({ view, navigate, onOpenAssistant, suggestionCount }: Pr
 
         <p className="rail__group">Connections</p>
         <ul className="rail__links">
-          {shown.map((c) => (
-            <li className="rail__link" key={c.id}>
-              <span className="rail__link-name">{c.displayName}</span>
-              <span
-                className={`rail__dot rail__dot--${dotOf(c.status)}`}
-                title={`${c.displayName}: ${c.status}`}
-              />
-            </li>
-          ))}
+          {shown.map((c) => {
+            const body = (
+              <>
+                <span className="rail__link-name">{c.displayName}</span>
+                <span
+                  className={`rail__dot rail__dot--${dotOf(c.status)}`}
+                  title={`${c.displayName}: ${c.status}`}
+                />
+              </>
+            );
+            if (!HAS_PANEL.has(c.id)) {
+              return (
+                <li key={c.id}>
+                  <span className="rail__link">{body}</span>
+                </li>
+              );
+            }
+            const on = openConnectors.includes(c.id);
+            return (
+              <li key={c.id}>
+                <button
+                  className={`rail__link rail__link--go${on ? ' rail__link--on' : ''}`}
+                  type="button"
+                  aria-pressed={on}
+                  title={
+                    on
+                      ? `Hide the ${c.displayName} card`
+                      : `Show the ${c.displayName} card`
+                  }
+                  onClick={() => onToggleConnector(c.id)}
+                >
+                  {body}
+                </button>
+              </li>
+            );
+          })}
           {linked.length > PINNED && (
             <li>
               <button

@@ -1,3 +1,72 @@
+/*
+ * The telemetry card.
+ *
+ * Its hue is amber, the colour this application already uses for something
+ * pending review, and its device is the sweep: a single line of light that
+ * crosses the top edge every few seconds. It is the one card on the page
+ * whose contents change on their own, second by second, and the sweep is
+ * how the card says so while sitting still.
+ *
+ * The shell lives here rather than in OverviewScreen.css because this panel
+ * is the only thing that ever wore it, and a generic rule for one caller is
+ * a rule two people have to read.
+ */
+.reminders-card {
+  position: relative;
+  padding: var(--space-md);
+  background:
+    linear-gradient(
+      12deg,
+      rgba(245, 158, 11, 0.07) 0%,
+      rgba(245, 158, 11, 0.015) 30%,
+      var(--color-bg-secondary) 55%
+    );
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.reminders-card .overview__section-title {
+  color: #f59e0b;
+  border-bottom-color: rgba(245, 158, 11, 0.22);
+}
+
+.reminders-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(245, 158, 11, 0.85) 50%,
+    transparent 100%
+  );
+  background-size: 38% 100%;
+  background-repeat: no-repeat;
+  background-position: -38% 0;
+  pointer-events: none;
+}
+
+/* Motion only where it is welcome. Without this the card still reads: the
+   line simply sits off the left edge and never arrives. */
+@media (prefers-reduced-motion: no-preference) {
+  .reminders-card::before {
+    animation: reminders-sweep 7s linear infinite;
+  }
+}
+
+@keyframes reminders-sweep {
+  0% {
+    background-position: -38% 0;
+  }
+  100% {
+    background-position: 138% 0;
+  }
+}
+
 .reminders {
   display: flex;
   flex-direction: column;
@@ -13,7 +82,7 @@
 
 .reminders__row {
   display: grid;
-  grid-template-columns: 74px 1fr auto 20px;
+  grid-template-columns: 74px 1fr auto;
   align-items: center;
   gap: var(--space-md);
   background-color: var(--color-bg-secondary);
@@ -77,11 +146,26 @@
   color: var(--color-status-online);
 }
 
+/* A reminder is whatever the user said into the microphone, so it wraps
+   rather than truncates. Two lines, because the row also has to stay short
+   enough that a column of them still reads as a list. */
 .reminders__what {
   font-size: 13px;
+  line-height: 1.4;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+/* The ring, timer, extend buttons and dismiss, kept together on the right so
+   the grid stays three columns no matter which of them a given row shows. */
+.reminders__controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
 }
 
 /* Tabular figures so a counting-down number does not jitter its own width
@@ -92,6 +176,32 @@
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.04em;
   color: var(--color-text-muted);
+  min-width: 56px;
+  text-align: right;
+}
+
+.reminders__extend {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.reminders__extend-btn {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.02em;
+  padding: 2px 6px;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.reminders__extend-btn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-text-muted);
+  background-color: var(--color-bg-tertiary);
 }
 
 .reminders__row--imminent .reminders__timer,
@@ -265,6 +375,31 @@
   letter-spacing: 0.08em;
   color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The exact-time field.
+ *
+ * On its own line rather than in the chip row: a `datetime-local` control is
+ * as wide as its longest rendering and would have pushed "fires at ..." off
+ * the end of the row on the narrow layout. It only exists while `At...` is
+ * on, so the row is unchanged for everyone using the offsets.
+ */
+.composer__exact {
+  align-self: flex-start;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 4px 8px;
+  background-color: var(--color-bg-primary);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  color-scheme: dark;
+}
+
+.composer__exact:focus {
+  outline: none;
+  border-color: #f59e0b;
 }
 
 .composer__error {
