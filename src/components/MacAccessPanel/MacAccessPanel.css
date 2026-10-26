@@ -1,0 +1,51 @@
+/* A settings surface, styled like the Permissions and Messages panels. */
+
+.mac-access {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 1rem 0;
+}
+
+.mac-access h2 {
+  margin: 0;
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--nexus-dim, #8a8a8a);
+}
+
+.mac-access__hint {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--nexus-dim, #8a8a8a);
+}
+
+.mac-access__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.mac-access__row input {
+  margin-top: 0.2rem;
+}
+
+.mac-access__row > span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.mac-access__what {
+  font-size: 0.75rem;
+  color: var(--nexus-dim, #8a8a8a);
+}
+
+.mac-access__error {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--nexus-red, #ff4d4d);
+}

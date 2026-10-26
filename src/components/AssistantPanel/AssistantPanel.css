@@ -197,3 +197,16 @@
 @media (prefers-reduced-motion: reduce) {
   .assistant-panel { transition: none; }
 }
+
+/* The line the assistant leads with when opened by a gesture (pressing the
+   core). Larger and warmer than the generic hint, because it is addressed to
+   the user rather than describing the panel. */
+.assistant-panel__greeting {
+  margin: 0;
+  padding: var(--space-md) 0;
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 300;
+  line-height: 1.4;
+  color: var(--color-text-primary);
+}

@@ -50,6 +50,18 @@ export function AppShell({
   // and AssistantPanel own their own IPC, so the no-nexus-db rule holds here.
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [spokenText, setSpokenText] = useState<string | null>(null);
+  // A one-off line the assistant leads with when opened by a gesture rather
+  // than by typing, e.g. pressing the core. Cleared on close so it does not
+  // reappear the next time the panel is opened by hand.
+  const [assistantGreeting, setAssistantGreeting] = useState<string | null>(null);
+  const openAssistant = useCallback((greeting?: string) => {
+    setAssistantGreeting(greeting ?? null);
+    setAssistantOpen(true);
+  }, []);
+  // Which connector cards the Overview is showing. Empty to start: the
+  // weather is worth a glance when it is asked for and is otherwise the
+  // least urgent thing on a screen about work.
+  const [openConnectors, setOpenConnectors] = useState<string[]>([]);
 
 
   /**
@@ -105,6 +117,12 @@ export function AppShell({
         navigate={navigate}
         onOpenAssistant={() => setAssistantOpen(true)}
         suggestionCount={0}
+        openConnectors={openConnectors}
+        onToggleConnector={(id) =>
+          setOpenConnectors((prev) =>
+            prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+          )
+        }
       />
 
       <div className="app-shell__column">
@@ -179,6 +197,8 @@ export function AppShell({
         settings={settings}
         onSettingsChange={onSettingsChange}
         navSeq={navSeq}
+        openConnectors={openConnectors}
+        onOpenAssistant={openAssistant}
       />
 
       <CommandBar
@@ -193,7 +213,11 @@ export function AppShell({
 
       <AssistantPanel
         open={assistantOpen}
-        onClose={() => setAssistantOpen(false)}
+        greeting={assistantGreeting}
+        onClose={() => {
+          setAssistantOpen(false);
+          setAssistantGreeting(null);
+        }}
         onOpen={() => setAssistantOpen(true)}
         navigate={navigate}
         voiceEnabled={settings.voiceEnabled}

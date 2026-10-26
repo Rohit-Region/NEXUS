@@ -1,0 +1,328 @@
+/*
+ * The briefing card.
+ *
+ * Three cards sit in this column and they were the same grey rectangle, so
+ * the eye had to read the heading to know which was which. Each now has its
+ * own device and its own hue, taken from a colour the card already used:
+ * this one is the accent, because these are the tickets with your name on
+ * them and they are the reason the window is open.
+ *
+ * The device here is the corner bracket: a frame that is drawn at the
+ * corners and left open along the edges, which is how a heads-up display
+ * marks the thing it is tracking.
+ */
+.jira {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  background:
+    linear-gradient(
+      158deg,
+      rgba(230, 57, 70, 0.075) 0%,
+      rgba(230, 57, 70, 0.02) 28%,
+      var(--color-bg-secondary) 52%
+    );
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.jira::before,
+.jira::after {
+  content: '';
+  position: absolute;
+  width: 15px;
+  height: 15px;
+  border: 1px solid var(--color-accent);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.jira::before {
+  top: -1px;
+  left: -1px;
+  border-right: 0;
+  border-bottom: 0;
+  border-top-left-radius: var(--radius-md);
+}
+
+.jira::after {
+  right: -1px;
+  bottom: -1px;
+  border-left: 0;
+  border-top: 0;
+  border-bottom-right-radius: var(--radius-md);
+}
+
+.jira__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding-bottom: var(--space-xs);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.jira__title {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+}
+
+/* When it last actually asked Jira. A list with no timestamp cannot be told
+   apart from a stale one. */
+.jira__meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.jira__refresh {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.jira__refresh:hover:not(:disabled) {
+  color: var(--color-accent);
+  border-color: var(--color-accent-dim);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .jira__refresh--busy {
+    animation: jira-spin 0.9s linear infinite;
+  }
+}
+
+@keyframes jira-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.jira__empty,
+.jira__error {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.jira__error {
+  color: var(--color-accent);
+}
+
+.jira__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* All statuses now show, so a long list gets a ceiling and scrolls rather
+     than pushing the cards below it off the screen. */
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+/*
+ * Two rows, not one.
+ *
+ * A Jira summary is a sentence somebody else wrote and there is no length it
+ * is guaranteed to be under. On one line beside the key, the status and the
+ * timestamp it had about 300px to live in inside a column of a three-column
+ * layout, so every ticket read "SSO Phase II: Search f...". The half that
+ * says what the ticket is about was always the half that got cut.
+ *
+ * Giving the summary the full width of the row and putting its metadata
+ * underneath costs about eighteen pixels of height per ticket and buys the
+ * whole sentence.
+ */
+.jira__open {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto 11px;
+  grid-template-areas:
+    "key summary summary icon"
+    "key status  ago     ago";
+  align-items: start;
+  column-gap: var(--space-sm);
+  row-gap: 2px;
+  width: 100%;
+  padding: 7px var(--space-sm);
+  background: transparent;
+  /* Coloured on the leading edge by where the ticket is, so the shape of
+     the day reads before any of the words do. */
+  border: 1px solid transparent;
+  border-left: 2px solid var(--color-text-muted);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.jira__open:hover {
+  background-color: var(--color-bg-tertiary);
+  border-color: var(--color-border);
+}
+
+/* The rail is the row's state. On hover it lights, so the thing the pointer
+   is on is also the thing that is glowing. */
+.jira__row--building .jira__open:hover {
+  box-shadow: -2px 0 8px -2px var(--color-accent);
+}
+
+.jira__row--review .jira__open:hover {
+  box-shadow: -2px 0 8px -2px #f59e0b;
+}
+
+.jira__row--testing .jira__open:hover {
+  box-shadow: -2px 0 8px -2px var(--color-status-online);
+}
+
+.jira__row--building .jira__open {
+  border-left-color: var(--color-accent);
+}
+
+.jira__row--review .jira__open {
+  border-left-color: #f59e0b;
+}
+
+.jira__row--testing .jira__open {
+  border-left-color: var(--color-status-online);
+}
+
+/* Boxed, because it is an identifier rather than words: it gets read as a
+   label and copied out, and a chip says that faster than bold text does. */
+.jira__key {
+  grid-area: key;
+  align-self: start;
+  padding: 1px 5px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  line-height: 1.35;
+  background: rgba(230, 57, 70, 0.08);
+  border: 1px solid rgba(230, 57, 70, 0.28);
+  border-radius: 3px;
+}
+
+/* Two lines, then an ellipsis. A ceiling is still wanted (a pathological
+   summary should not push the reminders off the screen), but two lines of
+   this column hold about 150 characters, which is past anything Jira's own
+   field length makes likely. */
+.jira__summary {
+  grid-area: summary;
+  font-size: 12px;
+  line-height: 1.45;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+/* The status, tinted by tone. No box, no fill: just the words in the same
+   colour as the row's leading rail, so the state reads without a loud badge
+   fighting the summary next to it. Building is accent, review amber, testing
+   green, waiting stays muted. */
+.jira__status {
+  grid-area: status;
+  justify-self: start;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+}
+
+.jira__status--building {
+  color: var(--color-accent);
+}
+
+.jira__status--review {
+  color: #f59e0b;
+}
+
+.jira__status--testing {
+  color: var(--color-status-online);
+}
+
+.jira__status--waiting {
+  color: var(--color-text-muted);
+}
+
+.jira__ago {
+  grid-area: ago;
+  justify-self: end;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The only unclassed child, and it belongs on the first line beside the
+   summary rather than wherever auto-placement would drop it. */
+.jira__open > svg {
+  grid-area: icon;
+  margin-top: 3px;
+}
+
+/* The backlog toggle.
+ *
+ * Off by default: "what is waiting" is a different question from "what am I
+ * doing", and here it outnumbers the answer nine to two. The count is on the
+ * chip so hiding it never hides how much there is.
+ */
+.jira__chip {
+  padding: 2px 7px;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.jira__chip:hover {
+  color: var(--color-text-secondary);
+  border-color: var(--color-text-muted);
+}
+
+.jira__chip--on {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+/* A waiting row looks waiting: grey rail, dimmed. Turning the filter on
+   should not make the list look busier than the work actually is. */
+.jira__row--waiting .jira__open {
+  border-left-color: var(--color-text-muted);
+  opacity: 0.62;
+}
+
+.jira__row--waiting .jira__open:hover {
+  opacity: 1;
+}

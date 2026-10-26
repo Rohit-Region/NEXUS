@@ -81,8 +81,52 @@ export function cancelApproval(token: number): Promise<number> {
   return invoke<number>('nexus_cancel_approval', { token });
 }
 
+/**
+ * How long a connector list is considered fresh enough to share.
+ *
+ * Two callers poll this on the same eight-second cycle and mount at the same
+ * moment, so they stay in phase and ask within milliseconds of each other:
+ * the rail's status dots and the core's connector nodes. Each answer costs
+ * every connector's own `status()`, and GitHub's talks to the network.
+ * Two seconds is long enough to merge that pair and far short of the cycle,
+ * so nothing here is ever showing a state the rail is not.
+ */
+const CONNECTORS_TTL_MS = 2000;
+
+let connectorsAt = 0;
+let connectorsCache: ConnectorView[] | null = null;
+/** A request already on the wire, so a second caller waits rather than asks. */
+let connectorsInFlight: Promise<ConnectorView[]> | null = null;
+
+/**
+ * Every connector, its status and its grants.
+ *
+ * Coalesced. A mutation that changes a connector does not come through here
+ * (`setPermissionGrant` and friends return the refreshed list themselves),
+ * so there is no path where a stale read hides a change the user just made.
+ * Call `refreshConnectors` for the cases that must not wait.
+ */
 export function listConnectors(): Promise<ConnectorView[]> {
-  return invoke<ConnectorView[]>('nexus_list_connectors');
+  if (connectorsInFlight) return connectorsInFlight;
+  if (connectorsCache && Date.now() - connectorsAt < CONNECTORS_TTL_MS) {
+    return Promise.resolve(connectorsCache);
+  }
+  return refreshConnectors();
+}
+
+/** As `listConnectors`, ignoring the cache and replacing it. */
+export function refreshConnectors(): Promise<ConnectorView[]> {
+  const request = invoke<ConnectorView[]>('nexus_list_connectors')
+    .then((rows) => {
+      connectorsCache = rows;
+      connectorsAt = Date.now();
+      return rows;
+    })
+    .finally(() => {
+      connectorsInFlight = null;
+    });
+  connectorsInFlight = request;
+  return request;
 }
 
 /** Grant or revoke a level. Returns the refreshed connector list. */
@@ -110,6 +154,57 @@ export function setConnectorConfig(
   config: Record<string, string>,
 ): Promise<void> {
   return invoke<void>('nexus_set_connector_config', { connectorId, config });
+}
+
+/**
+ * Store a credential for a connector, in the macOS Keychain.
+ *
+ * Never in `nexus.db`: `setConnectorConfig` refuses keys that look like
+ * secrets, and this is the channel that exists instead. Rust reads the value
+ * back after writing and reports a truncated write, because `security`
+ * silently caps a secret at 128 characters and a two-thirds token fails
+ * later as a confusing 401.
+ */
+export function storeConnectorSecret(
+  connectorId: string,
+  account: string,
+  secret: string,
+): Promise<void> {
+  return invoke<void>('nexus_store_connector_secret', {
+    connectorId,
+    account,
+    secret,
+  });
+}
+
+/** Whether one is stored. Never returns the value itself. */
+export function connectorSecretPresent(
+  connectorId: string,
+  account: string,
+): Promise<boolean> {
+  return invoke<boolean>('nexus_connector_secret_present', {
+    connectorId,
+    account,
+  });
+}
+
+export interface VaultStatus {
+  label: string;
+  present: boolean;
+  /** Unix seconds of the last set, or null if never set. */
+  updatedAt: number | null;
+}
+
+/** Store or replace a manually rotated credential. The value goes to the
+ *  Keychain and is never read back to the UI. */
+export function vaultSet(label: string, secret: string): Promise<void> {
+  return invoke<void>('nexus_vault_set', { label, secret });
+}
+
+/** Whether a vault credential is present and when it was last set. Never the
+ *  value itself. */
+export function vaultStatus(label: string): Promise<VaultStatus> {
+  return invoke<VaultStatus>('nexus_vault_status', { label });
 }
 
 export function setConnectorEnabled(
@@ -305,6 +400,17 @@ export function createCommitment(
 
 export function deleteCommitment(id: number): Promise<void> {
   return invoke<void>('nexus_delete_commitment', { id });
+}
+
+/**
+ * Push a reminder out to a new time.
+ *
+ * `dueAt` is unix seconds and must be in the future. Reopens a reminder that
+ * had already fired, so this is both "snooze the one that just went off" and
+ * "give the armed one more time". Returns the updated row.
+ */
+export function deferCommitment(id: number, dueAt: number): Promise<Commitment> {
+  return invoke<Commitment>('nexus_defer_commitment', { id, dueAt });
 }
 
 export function assistantCancelTurn(): Promise<SessionSnapshot> {

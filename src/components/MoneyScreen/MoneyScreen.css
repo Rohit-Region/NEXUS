@@ -1,0 +1,1061 @@
+/*
+ * The Money screen. A ledger, so the craft is in the numbers: tabular figures
+ * that line up, a calm ground, and semantic colour (green up, red down) kept
+ * separate from the app accent. Information, laid out to be scanned.
+ */
+.money {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  max-width: 880px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.money__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-md);
+  color: var(--color-accent);
+}
+
+.money__headings {
+  flex: 1;
+}
+
+.money__title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.money__subtitle {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.money__refresh {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.money__refresh:hover:not(:disabled) {
+  color: var(--color-accent);
+  border-color: var(--color-accent-dim);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .money__refresh--busy {
+    animation: money-spin 0.9s linear infinite;
+  }
+}
+
+@keyframes money-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Totals. The headline number and the day's move, side by side. */
+.money__totals {
+  display: flex;
+  gap: var(--space-md);
+}
+
+.money__total {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--space-md) var(--space-lg);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.money__total-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.money__total-value {
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.money__total-change {
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.money__total-change--up {
+  color: #34d399;
+}
+
+.money__total-change--down {
+  color: #f87171;
+}
+
+.money__status {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-accent);
+}
+
+/* Add a holding. */
+.money__add {
+  display: flex;
+  gap: var(--space-xs);
+}
+
+.money__input {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 7px 10px;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+}
+
+.money__input:focus {
+  outline: none;
+  border-color: var(--color-accent-dim);
+}
+
+.money__input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.money__input--sym {
+  flex: 2;
+}
+
+.money__input--qty {
+  flex: 0 0 90px;
+  text-align: right;
+}
+
+.money__input--label {
+  flex: 1;
+}
+
+.money__add-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  flex: 0 0 auto;
+  background: transparent;
+  border: 1px solid var(--color-accent-dim);
+  border-radius: var(--radius-sm);
+  color: var(--color-accent);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.money__add-btn:hover {
+  background-color: rgba(230, 57, 70, 0.12);
+}
+
+.money__empty {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-text-muted);
+  padding: var(--space-md);
+  background: var(--color-bg-secondary);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.money__empty code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+/* The ledger. */
+.money__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.money__row {
+  display: grid;
+  grid-template-columns: 2fr 0.7fr 1fr 1.2fr 1.1fr 32px;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 10px var(--space-md);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.money__row:last-child {
+  border-bottom: none;
+}
+
+.money__row--head {
+  padding: 7px var(--space-md);
+  background: var(--color-bg-tertiary);
+}
+
+.money__row--head .money__cell {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.money__cell--num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--color-text-primary);
+}
+
+.money__cell--name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.money__name {
+  font-size: 13px;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.money__sym {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+
+.money__chg--up {
+  color: #34d399;
+}
+
+.money__chg--down {
+  color: #f87171;
+}
+
+.money__err {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.money__cell--x {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.money__remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.money__remove:hover {
+  color: #f87171;
+  background-color: var(--color-bg-tertiary);
+}
+
+@media (max-width: 720px) {
+  .money__row {
+    grid-template-columns: 1.6fr 0.6fr 1fr 1fr 32px;
+  }
+
+  /* Drop the price column first on narrow widths; value and change matter more. */
+  .money__row .money__cell:nth-child(3) {
+    display: none;
+  }
+}
+
+/* The adder: a mode switch over the input row. */
+.money__adder {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.money__modes {
+  display: flex;
+  gap: var(--space-xs);
+}
+
+.money__mode {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 4px 11px;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.money__mode:hover {
+  color: var(--color-text-secondary);
+  border-color: var(--color-text-muted);
+}
+
+.money__mode--on {
+  color: var(--color-bg-primary);
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+/* Fund search results. */
+.money__mf {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.money__results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-primary);
+}
+
+.money__result {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 7px 10px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.money__result:last-child {
+  border-bottom: none;
+}
+
+.money__result:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.money__picked {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-sm);
+  border: 1px solid var(--color-accent-dim);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+}
+
+.money__picked-name {
+  font-size: 12px;
+  color: var(--color-text-primary);
+}
+
+.money__link {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0 6px;
+}
+
+.money__link:hover {
+  color: var(--color-accent);
+}
+
+/* Row sub-line: a kind tag plus the symbol. */
+.money__sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.money__kind {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
+}
+
+.money__kind--mf {
+  color: #a78bfa;
+  background: rgba(167, 139, 250, 0.12);
+}
+
+.money__kind--manual {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.12);
+}
+
+/* Money sub-tabs. */
+.money__tabs {
+  display: flex;
+  gap: var(--space-xs);
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: var(--space-sm);
+}
+
+.money__tab {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  padding: 5px 14px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.money__tab:hover {
+  color: var(--color-text-secondary);
+}
+
+.money__tab--on {
+  color: var(--color-text-primary);
+  background: var(--color-bg-tertiary);
+}
+
+.money__note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+
+.money__input--date,
+.money__input--rate {
+  flex: 0 0 auto;
+}
+
+.money__input--rate {
+  width: 84px;
+  text-align: right;
+}
+
+/* Goals. */
+.goals,
+.retire {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.goals__add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.goals__add .money__input {
+  flex: 1;
+  min-width: 120px;
+}
+
+.goals__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.goal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.goal__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.goal__name {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.goal__target {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.goal__bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--color-bg-tertiary);
+  overflow: hidden;
+}
+
+.goal__bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #34d399, #22c55e);
+  transition: width 0.4s ease;
+}
+
+.goal__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.goal__pct {
+  color: #34d399;
+  font-weight: 600;
+}
+
+.goal__years {
+  color: var(--color-text-muted);
+}
+
+.goal__need {
+  color: var(--color-text-secondary);
+}
+
+.goal__saved {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.goal__saved-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.goal__saved-edit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-muted);
+}
+
+/* Retirement. */
+.retire__form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-sm);
+}
+
+.retire__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.retire__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+.retire__input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.retire__input-wrap .money__input {
+  width: 100%;
+}
+
+.retire__suffix {
+  position: absolute;
+  right: 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+
+.retire__result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.retire__verdict {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.retire__verdict--ok {
+  color: #34d399;
+}
+
+.retire__verdict--short {
+  color: #fbbf24;
+}
+
+.retire__verdict-sub {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+
+.retire__figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-md);
+}
+
+.retire__fig {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.retire__fig-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.retire__fig-value {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.retire__fig-value--short {
+  color: #fbbf24;
+}
+
+/* Bills & tax. */
+.bills {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.bills__add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.bills__add .money__input {
+  flex: 1;
+  min-width: 110px;
+}
+
+.bills__select {
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+
+.bills__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.bills__row {
+  display: grid;
+  grid-template-columns: 10px 1.6fr 1fr 1fr 28px;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 10px var(--space-md);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.bills__row:last-child {
+  border-bottom: none;
+}
+
+.bills__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.bills__dot--over {
+  background: #f87171;
+}
+
+.bills__dot--soon {
+  background: #fbbf24;
+}
+
+.bills__dot--later {
+  background: var(--color-text-muted);
+}
+
+.bills__name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+  color: var(--color-text-primary);
+  min-width: 0;
+}
+
+.bills__meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+
+.bills__amount {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  text-align: right;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.bills__when {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.bills__due {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.bills__due--over {
+  color: #f87171;
+}
+
+.bills__due--soon {
+  color: #fbbf24;
+}
+
+.bills__due--later {
+  color: var(--color-text-secondary);
+}
+
+.bills__date {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+
+/* India tax dates. */
+.bills__tax {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-md);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.bills__tax-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+}
+
+.bills__taxlist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.bills__taxrow {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr auto;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 5px 0;
+}
+
+.bills__disclaimer {
+  margin: 4px 0 0;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+
+/* Holdings grouped by where they are held, each with its totals. */
+.money__group {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin-top: var(--space-sm);
+  padding: 8px 4px 6px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.money__group-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.money__group-figs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.money__group-sub,
+.money__asof {
+  color: var(--color-text-secondary);
+}
+
+.money__asof {
+  display: block;
+  font-size: 10px;
+}
+
+.money__kind--ulip {
+  color: #a78bfa;
+}
+
+/* The portfolio chat box. */
+.pchat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: 12px 14px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.pchat__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.pchat__form {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: stretch;
+}
+
+.pchat__input {
+  flex: 1;
+  min-width: 0;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.pchat__send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  background: var(--color-accent);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: #fff;
+  cursor: pointer;
+}
+
+.pchat__send:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.pchat__preview {
+  padding: 10px 12px;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--color-text-primary);
+}
+
+.pchat__label {
+  margin: 0 0 4px;
+  color: var(--color-text-secondary);
+}
+
+.pchat__lines {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  line-height: 1.6;
+}
+
+.pchat__miss {
+  margin: 0 0 8px;
+  color: #fbbf24;
+}
+
+.pchat__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.pchat__apply {
+  padding: 6px 14px;
+  background: var(--color-accent);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pchat__cancel {
+  padding: 0;
+  background: none;
+  border: none;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.pchat__result {
+  margin: 0;
+  font-size: 12px;
+  color: #34d399;
+}
+
+.pchat__help {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.pchat__help summary {
+  cursor: pointer;
+}
+
+.pchat__help ul {
+  margin: 6px 0;
+  padding-left: 16px;
+}
+
+.pchat__help p {
+  margin: 0;
+}
+
+.pchat__example {
+  padding: 1px 0;
+  background: none;
+  border: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-accent);
+  cursor: pointer;
+  text-align: left;
+}
+
+.pchat__send:focus-visible,
+.pchat__apply:focus-visible,
+.pchat__example:focus-visible {
+  outline: 2px solid var(--color-text-primary);
+  outline-offset: 2px;
+}

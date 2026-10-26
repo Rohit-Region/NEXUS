@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { X } from 'lucide-react';
-import { deleteCommitment, listCommitments } from '../../lib/assistant';
+import {
+  deferCommitment,
+  deleteCommitment,
+  listCommitments,
+} from '../../lib/assistant';
 import type { Commitment } from '../../lib/assistant';
 import { ReminderComposer } from './ReminderComposer';
 import { CountdownRing } from './CountdownRing';
@@ -10,6 +14,13 @@ import './RemindersPanel.css';
 const TICK_MS = 1000;
 /** How often the list is re-read, to pick up ones NEXUS raised on its own. */
 const REFRESH_MS = 8000;
+
+/** The amounts you can push a reminder out by, in minutes. */
+const EXTEND_BY: Array<{ label: string; minutes: number }> = [
+  { label: '+5m', minutes: 5 },
+  { label: '+15m', minutes: 15 },
+  { label: '+1h', minutes: 60 },
+];
 
 type Phase = 'untimed' | 'scheduled' | 'imminent' | 'due' | 'raised';
 
@@ -86,18 +97,45 @@ export function RemindersPanel() {
   // Separate from the reload: the clock has to move every second, and
   // re-reading the database at that rate to redraw a number would be
   // absurd.
+  //
+  // It only runs when something is actually counting. A reminder that has
+  // already been raised, or that has no time on it, shows the same words a
+  // second from now as it does this second, so a panel full of those was
+  // re-rendering every row once a second to change nothing. That is cheap
+  // per tick and never free, and it competes with scrolling for the same
+  // thread.
+  const counting = items.some((c) => c.dueAt !== null && c.raisedAt === null);
+
   useEffect(() => {
+    if (!counting) return;
     const timer = window.setInterval(
       () => setNow(Math.floor(Date.now() / 1000)),
       TICK_MS,
     );
     return () => window.clearInterval(timer);
-  }, []);
+  }, [counting]);
 
   async function dismiss(id: number) {
     try {
       await deleteCommitment(id);
       setItems((prev) => prev.filter((c) => c.id !== id));
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
+  // Extend from whichever is later: the current due time, or now. An armed
+  // reminder gets more runway added to its own deadline; one already overdue
+  // or told is pushed out from the present, which is what "give me 15 more
+  // minutes" means in each case.
+  async function extend(c: Commitment, minutes: number) {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const base = Math.max(c.dueAt ?? nowSec, nowSec);
+    const dueAt = base + minutes * 60;
+    try {
+      const updated = await deferCommitment(c.id, dueAt);
+      setItems((prev) => prev.map((x) => (x.id === c.id ? updated : x)));
+      setError(null);
     } catch (err) {
       setError(String(err));
     }
@@ -116,7 +154,7 @@ export function RemindersPanel() {
   });
 
   return (
-    <div className="overview__section">
+    <div className="overview__section reminders-card">
       <span className="overview__section-title">Reminders</span>
 
       {error && (
@@ -152,34 +190,55 @@ export function RemindersPanel() {
 
               <span className="reminders__what">{c.what}</span>
 
-              {phase !== 'untimed' && phase !== 'raised' && (
-                <CountdownRing
-                  left={left}
-                  span={span}
-                  imminent={phase === 'imminent' || phase === 'due'}
-                />
-              )}
-
-              <span className="reminders__timer" aria-live="off">
-                {phase === 'untimed' ? (
-                  <span className="reminders__never">will not fire</span>
-                ) : phase === 'raised' ? (
-                  'told you'
-                ) : phase === 'due' ? (
-                  `overdue ${countdown(-left)}`
-                ) : (
-                  countdown(left)
+              <span className="reminders__controls">
+                {phase !== 'untimed' && phase !== 'raised' && (
+                  <CountdownRing
+                    left={left}
+                    span={span}
+                    imminent={phase === 'imminent' || phase === 'due'}
+                  />
                 )}
-              </span>
 
-              <button
-                className="reminders__dismiss"
-                type="button"
-                onClick={() => void dismiss(c.id)}
-                aria-label={`Dismiss reminder: ${c.what}`}
-              >
-                <X size={12} strokeWidth={2.5} aria-hidden="true" />
-              </button>
+                <span className="reminders__timer" aria-live="off">
+                  {phase === 'untimed' ? (
+                    <span className="reminders__never">will not fire</span>
+                  ) : phase === 'raised' ? (
+                    'told you'
+                  ) : phase === 'due' ? (
+                    `overdue ${countdown(-left)}`
+                  ) : (
+                    countdown(left)
+                  )}
+                </span>
+
+                {/* Extend. A reminder you want more time on should not have to
+                    be deleted and re-made; these push its deadline out in
+                    place. Shown on every row, because "give me more time" is
+                    as true for one already told as for one still armed. */}
+                <span className="reminders__extend">
+                  {EXTEND_BY.map((e) => (
+                    <button
+                      key={e.minutes}
+                      className="reminders__extend-btn"
+                      type="button"
+                      onClick={() => void extend(c, e.minutes)}
+                      aria-label={`Extend "${c.what}" by ${e.label}`}
+                      title={`Extend by ${e.label}`}
+                    >
+                      {e.label}
+                    </button>
+                  ))}
+                </span>
+
+                <button
+                  className="reminders__dismiss"
+                  type="button"
+                  onClick={() => void dismiss(c.id)}
+                  aria-label={`Dismiss reminder: ${c.what}`}
+                >
+                  <X size={12} strokeWidth={2.5} aria-hidden="true" />
+                </button>
+              </span>
             </div>
           );
         })}

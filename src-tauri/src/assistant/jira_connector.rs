@@ -86,6 +86,11 @@ pub const ACTIONS: &[ActionSpec] = &[
         Permission::Read,
     ),
     spec(
+        "jira.recent_work",
+        "List my Jira issues touched since the last working day",
+        Permission::Read,
+    ),
+    spec(
         "jira.find_for_task",
         "Find the Jira issue linked to a task",
         Permission::Read,
@@ -429,6 +434,13 @@ struct IssueRef {
     key: String,
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields, default)]
+struct RecentRef {
+    /// Days back to the previous working day. 1 by default, 3 on a Monday.
+    days: Option<i64>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct TransitionInput {
@@ -660,7 +672,19 @@ impl Connector for JiraConnector {
                 // Every one of them, not the first few. There are as many as
                 // are actually in flight, which is a handful; truncating a
                 // list this short only makes the user ask again.
-                let lines: Vec<String> = issues
+                // Spoken, the backlog is a count rather than a recital.
+                //
+                // Including it in the list was right; reading eleven ticket
+                // numbers aloud is not. What is picked up gets named,
+                // because that is what the day is made of; what is still
+                // waiting gets a number, because the only useful fact about
+                // it is how much there is.
+                let (waiting, active): (Vec<&serde_json::Value>, Vec<&serde_json::Value>) =
+                    issues.iter().partition(|i| {
+                        i.get("status").and_then(|s| s.as_str()) == Some("Open")
+                    });
+
+                let named: Vec<String> = active
                     .iter()
                     .filter_map(|i| {
                         Some(format!(
@@ -670,10 +694,24 @@ impl Connector for JiraConnector {
                         ))
                     })
                     .collect();
-                Some(if lines.len() == 1 {
-                    format!("One ticket: {}.", lines.join(""))
-                } else {
-                    format!("{} tickets. {}.", lines.len(), lines.join(", "))
+
+                let backlog = match waiting.len() {
+                    0 => String::new(),
+                    1 => " One more is waiting in the backlog.".to_string(),
+                    n => format!(" {n} more are waiting in the backlog."),
+                };
+
+                Some(match named.len() {
+                    0 => format!(
+                        "Nothing picked up.{}",
+                        if backlog.is_empty() {
+                            " Nothing in the backlog either.".to_string()
+                        } else {
+                            backlog
+                        }
+                    ),
+                    1 => format!("One ticket: {}.{backlog}", named.join("")),
+                    n => format!("{n} tickets. {}.{backlog}", named.join(", ")),
                 })
             }
             "jira.status" => Some(if output.get("configured")?.as_bool().unwrap_or(false) {
@@ -883,20 +921,32 @@ impl Connector for JiraConnector {
                 // Unresolved only. "What is assigned to me" means what is
                 // still on the plate; a year of closed tickets is not an
                 // answer to it.
-                // Work actually in flight, which is what "my tickets" means.
+                // Everything picked up: not finished, and not still sitting
+                // untouched in the backlog.
                 //
-                // `resolution = Unresolved` was wrong and returned 17 where
-                // the user sees 4: it swept in everything never given a
-                // resolution field, including nine sitting untouched in the
-                // backlog and four already marked Done by a workflow that
-                // does not set one.
+                // Two wrong versions preceded this one, and both were wrong
+                // in the same direction: guessing the rule from a sample
+                // instead of asking what the sample had in common.
                 //
-                // `statusCategory` rather than named statuses, because the
-                // names are per-workflow: this team uses "In Development",
-                // "In Review", "Ready for Team Testing" and "Team Tests
-                // Passed", and a hardcoded list would go stale the first
-                // time somebody edits the board.
-                let jql = "assignee = currentUser() AND statusCategory = \"In Progress\" \
+                //   Filtering on an unset resolution returned 17 where the
+                //   user saw 4, sweeping in a backlog nobody had started and
+                //   tickets a workflow had closed without setting one.
+                //
+                //   Narrowing to the in-progress category fixed that and
+                //   then dropped a ticket in "Ready for Development":
+                //   assigned, picked up, and categorised To Do.
+                //
+                // Everything not finished, backlog included. Excluding the
+                // backlog was the third wrong answer: it is still assigned,
+                // still theirs, and leaving it out means the panel disagrees
+                // with the board they are looking at.
+                //
+                // Ordered here rather than in the JQL: Jira sorts statuses
+                // by workflow position, which put the backlog on top. What
+                // is picked up goes first, and the backlog sinks without
+                // being cut.
+
+                let jql = "assignee = currentUser() AND statusCategory != Done \
                            ORDER BY updated DESC";
                 let value = read_json(
                     ctx,
@@ -906,12 +956,66 @@ impl Connector for JiraConnector {
                         encode(jql)
                     ),
                 )?;
-                let issues: Vec<serde_json::Value> = value
+                let mut issues: Vec<serde_json::Value> = value
                     .get("issues")
                     .and_then(|v| v.as_array())
                     .map(|rows| rows.iter().map(shape_issue).collect())
                     .unwrap_or_default();
+
+                // Picked up first, backlog after, each half newest first.
+                // A stable sort keeps the API's ordering within each group.
+                issues.sort_by_key(|i| {
+                    i.get("status").and_then(|s| s.as_str()) == Some("Open")
+                });
+
                 Ok(serde_json::json!({ "issues": issues, "mine": true }))
+            }
+
+            "jira.recent_work" => {
+                // For the standup. `my_issues` deliberately leaves out Done,
+                // which is exactly what a standup's "yesterday" needs most:
+                // the ticket finished. So this is every status, narrowed by
+                // when it last changed instead. `days` reaches back to the
+                // previous working day (3 on a Monday). "Updated" means
+                // touched by anyone, not necessarily by the user, which is
+                // why the standup it feeds is a draft to edit.
+                let target: RecentRef = parse(input)?;
+                let days = target.days.unwrap_or(1).clamp(1, 7);
+                read_json(ctx, &creds, "/rest/api/3/myself")?;
+                let jql = format!(
+                    "assignee = currentUser() AND updated >= startOfDay(-{days}) \
+                     ORDER BY updated DESC"
+                );
+                let value = read_json(
+                    ctx,
+                    &creds,
+                    &format!(
+                        "{SEARCH_PATH}?jql={}&maxResults={SEARCH_LIMIT}&fields=summary,status,updated",
+                        encode(&jql)
+                    ),
+                )?;
+                let issues: Vec<serde_json::Value> = value
+                    .get("issues")
+                    .and_then(|v| v.as_array())
+                    .map(|rows| {
+                        rows.iter()
+                            .map(|row| {
+                                let mut shaped = shape_issue(row);
+                                // new | indeterminate | done: tells "finished"
+                                // from "worked on" across any workflow's names.
+                                let category = row
+                                    .pointer("/fields/status/statusCategory/key")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("indeterminate");
+                                if let Some(obj) = shaped.as_object_mut() {
+                                    obj.insert("category".into(), serde_json::json!(category));
+                                }
+                                shaped
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                Ok(serde_json::json!({ "issues": issues, "days": days }))
             }
 
             "jira.find_for_task" => {
@@ -971,9 +1075,10 @@ mod tests {
             !production.contains("\"/rest/api/3/search?"),
             "the removed endpoint must not come back"
         );
-        // Both callers go through the constant, so there is one place to
-        // change when Atlassian moves it again.
-        assert_eq!(production.matches("{SEARCH_PATH}?jql=").count(), 2);
+        // Every caller (search, my_issues, recent_work) goes through the
+        // constant, so there is one place to change when Atlassian moves it
+        // again. A new search must be added here deliberately.
+        assert_eq!(production.matches("{SEARCH_PATH}?jql=").count(), 3);
     }
 
     #[test]
@@ -994,7 +1099,24 @@ mod tests {
             !production.contains("assignee = \\\""),
             "the assignee must never be interpolated from configuration"
         );
-        assert!(production.contains("resolution = Unresolved"));
+        // Not finished. That is the whole rule, and it took three tries:
+        // an unset resolution swept in tickets a workflow had closed, and
+        // narrowing to the in-progress category dropped everything picked
+        // up but not started. The backlog belongs in the list because it is
+        // still assigned; it is only summarised as a count when spoken.
+        assert!(production.contains("statusCategory != Done"));
+        assert!(
+            !production.contains("status != \\\"Open\\\""),
+            "the backlog is assigned work and belongs in the list"
+        );
+        assert!(
+            !production.contains("resolution = Unresolved"),
+            "resolution is not the filter: a workflow can close a ticket without setting one"
+        );
+        assert!(
+            !production.contains("statusCategory = \\\"In Progress\\\""),
+            "too narrow: it drops a ticket in Ready for Development"
+        );
     }
 
     #[test]
@@ -1037,6 +1159,53 @@ mod tests {
             !said.contains("AUTH.1") && !said.contains("Trades"),
             "no summaries in the morning update: {said}"
         );
+    }
+
+    #[test]
+    fn picked_up_work_sorts_above_the_backlog() {
+        // Jira orders statuses by workflow position, which put the backlog
+        // on top. The panel reads top-down, so what is being worked on has
+        // to be there.
+        let production = include_str!("jira_connector.rs")
+            .split_once("#[cfg(test)]")
+            .map(|(before, _)| before)
+            .expect("marker");
+        assert!(
+            production.contains("issues.sort_by_key"),
+            "ordering must not be left to the API"
+        );
+    }
+
+    #[test]
+    fn the_backlog_is_counted_rather_than_recited() {
+        // Including it in the list was right; reading eleven ticket numbers
+        // aloud is not. Picked-up work is named because that is what the day
+        // is made of; waiting work gets a number.
+        let mut rows = vec![
+            serde_json::json!({ "key": "PROJ-1027", "status": "In Development" }),
+            serde_json::json!({ "key": "PROJ-923", "status": "Ready for Development" }),
+        ];
+        for n in 1..=9 {
+            rows.push(serde_json::json!({ "key": format!("PROJ-{n}"), "status": "Open" }));
+        }
+        let said = JiraConnector
+            .describe_result("jira.my_issues", &serde_json::json!({ "issues": rows }))
+            .expect("must describe");
+
+        assert!(said.contains("PROJ-1027 is In Development"), "{said}");
+        assert!(said.contains("PROJ-923 is Ready for Development"), "{said}");
+        assert!(said.contains("9 more are waiting in the backlog"), "{said}");
+        assert!(!said.contains("PROJ-5"), "the backlog is not recited: {said}");
+    }
+
+    #[test]
+    fn a_backlog_with_nothing_picked_up_still_says_so() {
+        let rows = vec![serde_json::json!({ "key": "PROJ-1", "status": "Open" })];
+        let said = JiraConnector
+            .describe_result("jira.my_issues", &serde_json::json!({ "issues": rows }))
+            .expect("must describe");
+        assert!(said.contains("Nothing picked up"), "{said}");
+        assert!(said.contains("One more is waiting"), "{said}");
     }
 
     #[test]

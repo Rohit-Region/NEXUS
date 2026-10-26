@@ -91,7 +91,7 @@
 
 .overview__recent-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-md);
   width: 100%;
   text-align: left;
@@ -112,14 +112,22 @@
   border-color: var(--color-border-accent);
 }
 
+/* Wraps rather than truncates, like every other card in this column. A task
+   title is a sentence somebody wrote and the end of it is usually the part
+   that says which task it is. */
 .overview__recent-title {
   flex: 1;
+  min-width: 0;
   font-family: var(--font-mono);
   font-size: 12px;
+  line-height: 1.4;
   color: var(--color-text-primary);
-  white-space: nowrap;
+  text-align: left;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .overview__recent-project {
@@ -187,16 +195,19 @@
 
 /* ── Command centre ───────────────────────────────────────────────────── */
 /*
- * Three columns with the core in the middle. The flanks are the two things
- * wanted before deciding what to do: what it is like outside, and what NEXUS
- * thinks needs attention.
+ * Two columns: what you have to do, and what NEXUS knows.
  *
- * It collapses to one column early. The core is the piece that must stay
- * whole; the panels beside it read perfectly well stacked.
+ * It was three, with the core standing between the flanks. That gave the
+ * widest fixed-size thing on the page a third of the window, took that width
+ * from the two columns holding sentences somebody else wrote, and left a
+ * tall empty band under the ring because nothing else lived in that column.
+ * Putting the core at the head of the right-hand stack solves both: the ring
+ * keeps its own row, and the panels beneath it fill the space it was
+ * wasting.
  */
 .cc {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) auto minmax(300px, 1.2fr);
+  grid-template-columns: 1fr;
   align-items: start;
   gap: var(--space-lg);
   margin-bottom: var(--space-lg);
@@ -211,18 +222,144 @@
 }
 
 /* The activity list gets a ceiling so the page does not grow without bound
-   as the audit trail fills. */
+   as the audit trail fills. 340px was set when a failed row was one clipped
+   line; now that a connector's complaint is allowed its three lines, the
+   same ceiling showed two entries and half of a third. */
 .cc__right .live {
-  max-height: 340px;
+  max-height: 460px;
 }
 
-@media (max-width: 1240px) {
+/*
+ * Two columns only once there is genuinely room for two.
+ *
+ * The threshold is on the *viewport*, but what has to fit is the content
+ * column, and 320px of that viewport is spent before this grid sees any of
+ * it: a 240px rail plus the scroller's 40px either side. At 1400px that
+ * leaves about 1080px, so each column clears 500 and no card is a strip.
+ * The old breakpoint was 1240px, which put three columns into 920px, and
+ * that is where the ellipses came from.
+ */
+@media (min-width: 1400px) {
   .cc {
-    grid-template-columns: 1fr;
-    justify-items: center;
+    /* The left column leans wider because it is the one carrying prose: a
+       Jira summary, a reminder in the user's own words. The right holds
+       numbers, a fixed-size ring and short lines. */
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
   }
-  .cc__left,
-  .cc__right {
-    width: 100%;
+
+  /* The core sits at the top of its column rather than filling the width of
+     one, so it keeps the legend beside the ring. Below about 520px of
+     column the legend wraps underneath on its own, which is the right
+     answer there and needs no rule. */
+  .cc__right .hud {
+    /* Row gap and column gap differ on purpose. When the legend wraps
+       underneath, 40px of it reads as the ring having come loose from its
+       own numbers; beside the ring the same 40px is the separation that
+       keeps them from crowding. */
+    gap: var(--space-md) var(--space-xl);
+    padding: var(--space-sm) 0 var(--space-md);
   }
+}
+
+/* Reminders arrived with the Overview's own section heading, which was
+   right when it sat between two other sections and is wrong inside a column
+   of cards. It now carries its own card shell, in RemindersPanel.css, so
+   nothing generic here has to know it is there. */
+
+/* ── The tasks card ───────────────────────────────────────────────────── */
+/*
+ * The fourth card in the left column, and the fourth hue: green, from the
+ * colour `done` already wears. Its device is the meter, which is the only
+ * one of the four that is made of the data rather than drawn around it.
+ *
+ * It exists because "Tasks by status" and "Recent activity" were two
+ * full-width strips stacked below the command centre, saying the same thing
+ * twice at two levels of detail while the left column ended half a screen
+ * above them.
+ */
+.tasks {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  background:
+    linear-gradient(
+      340deg,
+      rgba(34, 197, 94, 0.075) 0%,
+      rgba(34, 197, 94, 0.018) 30%,
+      var(--color-bg-secondary) 55%
+    );
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.tasks__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: var(--space-xs);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-status-online);
+}
+
+.tasks__title {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.tasks__total {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The proportional bar.
+ *
+ * Segments grow by their count, so two blocked out of twenty is a sliver
+ * and twelve in progress is most of the bar. A fixed four-part strip would
+ * have said the same thing at every ratio, which is to say nothing.
+ */
+.tasks__meter {
+  display: flex;
+  gap: 2px;
+  height: 4px;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.tasks__seg {
+  flex-basis: 0;
+  border-radius: 999px;
+  min-width: 3px;
+}
+
+.tasks__seg--open        { background: var(--color-text-muted); }
+.tasks__seg--in_progress { background: var(--color-accent); }
+.tasks__seg--blocked     { background: var(--color-accent-dim); }
+.tasks__seg--done        { background: var(--color-status-online); }
+
+/* No tasks at all: an empty track, so the row does not vanish and leave the
+   card looking like it failed to load. */
+.tasks__meter-empty {
+  flex: 1;
+  background: var(--color-border);
+  border-radius: 999px;
+}
+
+/* Inside the card these two were section-level blocks with their own
+   headings. The heading is now the card's, so they are just rows. */
+.tasks .overview__statuses {
+  gap: var(--space-sm) var(--space-md);
+}
+
+.tasks .overview__recent {
+  padding-top: var(--space-xs);
+  border-top: 1px solid var(--color-border);
 }

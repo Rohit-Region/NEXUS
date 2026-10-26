@@ -1,0 +1,188 @@
+/*
+ * The credential card.
+ *
+ * Its hue is a warm amber-gold, the colour of a held key, and it is the one
+ * card here whose frame changes with its state rather than staying a constant
+ * accent: green when the password is current, accent when the week is up and
+ * it wants rotating, muted when nothing is stored. The state is the whole
+ * point of the card, so the card wears it.
+ */
+.vault {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  background:
+    linear-gradient(
+      145deg,
+      rgba(234, 179, 8, 0.06) 0%,
+      rgba(234, 179, 8, 0.015) 30%,
+      var(--color-bg-secondary) 55%
+    );
+  border: 1px solid var(--color-border);
+  border-left: 2px solid var(--color-text-muted);
+  border-radius: var(--radius-md);
+  transition: border-color 0.2s ease;
+}
+
+.vault--fresh {
+  border-left-color: var(--color-status-online);
+}
+
+.vault--due {
+  border-left-color: var(--color-accent);
+}
+
+.vault--unset {
+  border-left-color: var(--color-text-muted);
+}
+
+.vault__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: var(--space-xs);
+  border-bottom: 1px solid var(--color-border);
+  color: #eab308;
+}
+
+.vault__title {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.vault__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.vault--fresh .vault__state {
+  color: var(--color-status-online);
+}
+
+.vault--due .vault__state {
+  color: var(--color-accent);
+}
+
+.vault__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.vault__line {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.vault__set {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.vault__set:hover {
+  color: #eab308;
+  border-color: rgba(234, 179, 8, 0.45);
+}
+
+.vault__input {
+  width: 100%;
+  padding: 7px var(--space-sm);
+  background-color: var(--color-bg-primary);
+  border: 1px solid rgba(234, 179, 8, 0.4);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  /* A password field wider than a couple of characters must not letterspace
+     the dots into something that hints at length. */
+  letter-spacing: normal;
+}
+
+.vault__input:focus {
+  outline: none;
+  border-color: #eab308;
+}
+
+.vault__actions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.vault__save,
+.vault__cancel {
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.vault__save {
+  background: rgba(234, 179, 8, 0.12);
+  border: 1px solid rgba(234, 179, 8, 0.5);
+  color: #eab308;
+}
+
+.vault__save:hover:not(:disabled) {
+  background: rgba(234, 179, 8, 0.2);
+  border-color: #eab308;
+}
+
+.vault__save:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.vault__cancel {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+}
+
+.vault__cancel:hover:not(:disabled) {
+  color: var(--color-text-secondary);
+  border-color: var(--color-text-muted);
+}
+
+.vault__note {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+
+.vault__error {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-accent);
+}

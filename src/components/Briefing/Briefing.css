@@ -1,0 +1,292 @@
+/*
+ * The briefing hero. Takes the slots "NEXUS says" and "Live activity" used to
+ * hold, and keeps their look: the accent-tinted gradient and the breathing
+ * pulse, so the assistant's presence is unchanged while the content becomes
+ * the user's world rather than the connectors' chatter.
+ */
+.brief {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-lg);
+  background: linear-gradient(
+    135deg,
+    rgba(230, 57, 70, 0.07) 0%,
+    var(--color-bg-secondary) 55%
+  );
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.brief__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+}
+
+.brief__kicker {
+  flex: 1;
+}
+
+.brief__refresh {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.brief__refresh:hover:not(:disabled) {
+  color: var(--color-accent);
+  border-color: var(--color-accent-dim);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .brief__refresh--busy {
+    animation: brief-spin 0.9s linear infinite;
+  }
+}
+
+@keyframes brief-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* The model-written lead. Large and light, like the headline it replaces.
+   Kept clear of the pulse on the right. */
+.brief__lead {
+  margin: 0;
+  max-width: 48ch;
+  padding-right: 72px;
+  font-size: 19px;
+  font-weight: 300;
+  line-height: 1.35;
+  color: var(--color-text-primary);
+  text-wrap: balance;
+}
+
+/* Attribution. NEXUS wrote this line, and says so rather than passing a
+   model's words off as fact. */
+.brief__by {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.brief__feed-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-xs);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--color-border);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.brief__count {
+  font-variant-numeric: tabular-nums;
+}
+
+.brief__feed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.brief__empty {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-muted);
+  padding: 4px 0;
+}
+
+.brief__item {
+  margin: 0;
+}
+
+/* The whole row opens the story, so the hit target is the row. */
+.brief__open {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  width: 100%;
+  padding: 5px var(--space-sm);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+}
+
+.brief__open:hover {
+  background-color: var(--color-bg-tertiary);
+}
+
+/* The feed, so a headline is attributable at a glance. Fixed width so the
+   titles start on a common left edge. */
+.brief__source {
+  flex: 0 0 auto;
+  width: 84px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brief__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brief__ago {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.brief__open .lucide {
+  flex: 0 0 auto;
+  align-self: center;
+  color: var(--color-text-muted);
+}
+
+.brief__open:hover .lucide {
+  color: var(--color-accent);
+}
+
+/* The assistant's presence, breathing. Behind the lead on the right. */
+.brief__pulse {
+  position: absolute;
+  right: var(--space-lg);
+  top: 58px;
+  transform: translateY(-50%);
+  width: 62px;
+  height: 62px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(230, 57, 70, 0.28) 0%,
+    rgba(230, 57, 70, 0.06) 55%,
+    transparent 72%
+  );
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.brief__pulse-core {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  box-shadow: 0 0 14px rgba(230, 57, 70, 0.8);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .brief__pulse-core {
+    animation: brief-breathe 3.2s ease-in-out infinite;
+  }
+}
+
+@keyframes brief-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.28);
+    opacity: 1;
+  }
+}
+
+@media (max-width: 1100px) {
+  .brief__pulse {
+    display: none;
+  }
+
+  .brief__lead {
+    padding-right: 0;
+  }
+}
+
+/* The day's actionable items, under the headline. */
+.brief__day {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-right: 72px;
+}
+
+.brief__chip {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 10px;
+  background: transparent;
+  border: 1px solid var(--color-accent-dim);
+  border-radius: 999px;
+  color: var(--color-accent);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+button.brief__chip:hover {
+  background-color: rgba(230, 57, 70, 0.1);
+}
+
+.brief__chip--quiet {
+  border-color: var(--color-border);
+  color: var(--color-text-muted);
+}
+
+/* The model's news line, now secondary: it sits with the news it summarises. */
+.brief__news-line {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+@media (max-width: 1100px) {
+  .brief__day {
+    padding-right: 0;
+  }
+}

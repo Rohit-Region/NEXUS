@@ -18,6 +18,8 @@
 
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use super::action::{ActionError, ActionSpec};
 use super::connector::{
@@ -29,7 +31,39 @@ use super::shell::{run, RunError, DEFAULT_TIMEOUT};
 
 pub const CONNECTOR_ID: &str = "github";
 
-const GH: &str = "gh";
+/// Where `gh` actually lives.
+///
+/// Absolute paths, because a bare program name is resolved against `PATH`
+/// and a macOS application bundle does not have the one you have in a
+/// terminal. Launched from the Dock, NEXUS inherits launchd's default
+/// `/usr/bin:/bin:/usr/sbin:/sbin`, and Homebrew is not on it. So
+/// `Command::new("gh")` failed with `NotFound` and NEXUS told the user to
+/// install a tool that was sitting in `/opt/homebrew/bin` the whole time.
+///
+/// Ordered by likelihood on this platform: Homebrew on Apple silicon,
+/// Homebrew on Intel, a system install, then a kegged one.
+const GH_CANDIDATES: [&str; 4] = [
+    "/opt/homebrew/bin/gh",
+    "/usr/local/bin/gh",
+    "/usr/bin/gh",
+    "/opt/homebrew/opt/gh/bin/gh",
+];
+
+/// The `gh` binary to run.
+///
+/// Falls back to the bare name when none of the candidates exist. That is
+/// deliberate: from a terminal launch `PATH` may well find an installation
+/// in a place this list does not know about, and if it cannot, the failure
+/// is the honest `NotFound` rather than a path nobody has.
+fn gh_bin() -> &'static str {
+    GH_CANDIDATES
+        .into_iter()
+        .find(|path| std::path::Path::new(path).exists())
+        .unwrap_or("gh")
+}
+/// Keychain service for a token stored through NEXUS's own Settings. The
+/// account is the GitHub login, so two identities can coexist.
+pub const KEYCHAIN_SERVICE: &str = "nexus-github";
 /// Longest list NEXUS will fetch. Anything more is a report, not an answer.
 const PR_LIMIT: &str = "20";
 
@@ -73,12 +107,30 @@ pub const ACTIONS: &[ActionSpec] = &[
         "Open a pull request in the browser",
         Permission::Interact,
     ),
+    spec(
+        "github.build_status",
+        "Check the latest build run for a repository",
+        Permission::Read,
+    ),
+    spec(
+        "github.my_prs",
+        "List my pull requests across tracked projects since a date",
+        Permission::Read,
+    ),
 ];
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ProjectRef {
     project_id: i64,
+    /// Narrow the list to pull requests matching this, using GitHub's own
+    /// search. Absent means the whole recent list.
+    ///
+    /// Exists so "the PR for KAI-645" is one precise question rather than
+    /// twenty results filtered afterwards, which is how a merged PR outside
+    /// the most recent twenty goes missing.
+    #[serde(default)]
+    query: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -86,6 +138,35 @@ struct ProjectRef {
 struct PrRef {
     project_id: i64,
     number: u64,
+}
+
+/// A repository given directly, not via a tracked project.
+///
+/// The build-status card watches a couple of repos that are not NEXUS projects,
+/// so it names them outright. Validated through `parse_repo` the same as any
+/// other, so a bad value is refused rather than handed to `gh`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RepoRef {
+    repo: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SinceRef {
+    /// YYYY-MM-DD.
+    since: String,
+}
+
+/// A date that may go into a `gh` search qualifier, or `None`. Exactly
+/// YYYY-MM-DD: anything else could add qualifiers to the search.
+fn valid_date(raw: &str) -> Option<&str> {
+    let b = raw.as_bytes();
+    let ok = b.len() == 10
+        && b[4] == b'-'
+        && b[7] == b'-'
+        && b.iter().enumerate().all(|(i, c)| i == 4 || i == 7 || c.is_ascii_digit());
+    ok.then_some(raw)
 }
 
 fn parse<T: serde::de::DeserializeOwned>(input: serde_json::Value) -> Result<T, ActionError> {
@@ -167,8 +248,94 @@ fn repo_for_project(conn: &Connection, project_id: i64) -> Result<(String, Strin
 
 // -- gh invocation ------------------------------------------------------------
 
+/// Which `gh` account owns a given GitHub organisation.
+///
+/// Read from this connector's `config_json`, shaped
+/// `{"accounts": {"some-org": "the-gh-login"}}`.
+///
+/// It exists because one machine can have two GitHub identities: a personal
+/// account that owns personal repositories, and a work account that is the
+/// only one able to see the employer's. `gh` keeps both but has a single
+/// *active* account, and that active account is also what git's credential
+/// helper uses. Switching it globally to read a work pull request would
+/// break pushing a personal repository from the same terminal.
+///
+/// So the account is chosen per repository, and nothing global changes.
+/// Unmapped owners fall through to whichever account is active, which is the
+/// behaviour every existing setup already has.
+fn account_for(conn: &Connection, repo: &str) -> Option<String> {
+    let owner = repo.split('/').next()?;
+    let raw: Option<String> = conn
+        .query_row(
+            "SELECT config_json FROM connectors WHERE connector_id = ?1",
+            [CONNECTOR_ID],
+            |row| row.get(0),
+        )
+        .ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&raw?).ok()?;
+    let login = parsed
+        .get("accounts")?
+        .get(owner)?
+        .as_str()?
+        .trim()
+        .to_string();
+    (!login.is_empty()).then_some(login)
+}
+
+/// That account's token, straight from `gh`'s own store.
+///
+/// Fetched at the moment of use and never written anywhere. This is a real
+/// weakening of what NEXUS used to guarantee, which was that it never held a
+/// GitHub token at all, and it is recorded here rather than left to be
+/// discovered: the token now lives in this process's memory for the length of
+/// one subprocess.
+///
+/// It reaches the child through the environment, never `argv`, because every
+/// process on this machine can read another's command line.
+fn token_for(login: &str) -> Option<String> {
+    // A token stored through NEXUS's own Settings comes first, so the whole
+    // setup can be done in the application without asking the user to
+    // operate `security` or `gh` in a terminal.
+    if let Some(stored) = super::http::keychain_secret(KEYCHAIN_SERVICE, login) {
+        let trimmed = stored.trim().to_string();
+        if !trimmed.is_empty() {
+            return Some(trimmed);
+        }
+    }
+
+    // Otherwise ask `gh`, which may already hold that account.
+    let out = run(gh_bin(), &["auth", "token", "--user", login], DEFAULT_TIMEOUT).ok()?;
+    if !out.success {
+        return None;
+    }
+    let token = out.stdout.trim().to_string();
+    (!token.is_empty()).then_some(token)
+}
+
+/// Run `gh` as whichever account can see this repository.
+fn gh_json_as(
+    conn: &Connection,
+    repo: &str,
+    args: &[&str],
+) -> Result<serde_json::Value, ActionError> {
+    match account_for(conn, repo).and_then(|login| token_for(&login)) {
+        Some(token) => gh_json_with_env(args, &[("GH_TOKEN", token.as_str())]),
+        // No mapping, or `gh` does not hold that account: fall back to the
+        // active one and let GitHub's own error explain itself. Guessing a
+        // different account would be worse than a clear "could not find".
+        None => gh_json(args),
+    }
+}
+
 fn gh_json(args: &[&str]) -> Result<serde_json::Value, ActionError> {
-    let out = run(GH, args, DEFAULT_TIMEOUT).map_err(|e| match e {
+    gh_json_with_env(args, &[])
+}
+
+fn gh_json_with_env(
+    args: &[&str],
+    env: &[(&str, &str)],
+) -> Result<serde_json::Value, ActionError> {
+    let out = super::shell::run_with_env(gh_bin(), args, env, DEFAULT_TIMEOUT).map_err(|e| match e {
         RunError::NotFound { .. } => ActionError::Failed {
             detail: "The GitHub CLI is not installed. Install it with `brew install gh`."
                 .to_string(),
@@ -200,13 +367,52 @@ fn gh_json(args: &[&str]) -> Result<serde_json::Value, ActionError> {
 }
 
 /// Whether `gh` exists and is signed in. Cheap enough for a capability read.
+/// How long a `gh auth status` answer is trusted.
+///
+/// Measured, not guessed: that command costs about 450ms on this machine,
+/// because it talks to github.com rather than reading a file. Two things ask
+/// every connector for its status every eight seconds (the rail's dots and
+/// the core's nodes), so it was running twice a cycle: nearly a second of
+/// work per eight, for an answer that changes when somebody runs
+/// `gh auth login` and at no other time.
+///
+/// A minute is the cost of being wrong: after signing in, the dot goes green
+/// within a minute rather than within eight seconds. That is the whole
+/// downside, and it buys back the frame budget.
+const READY_TTL: Duration = Duration::from_secs(60);
+
+/// Last answer and when it was given. `None` until the first call.
+static READY_CACHE: Mutex<Option<(Instant, ConnectorStatus)>> = Mutex::new(None);
+
 fn gh_ready() -> ConnectorStatus {
-    match run(GH, &["auth", "status"], DEFAULT_TIMEOUT) {
+    // A poisoned mutex here means a previous caller panicked mid-check. The
+    // cached value is still a valid `ConnectorStatus` either way, so the
+    // recovery is to use it rather than to bring the status bar down.
+    let mut cache = READY_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((asked, status)) = *cache {
+        if asked.elapsed() < READY_TTL {
+            return status;
+        }
+    }
+
+    let status = match run(gh_bin(), &["auth", "status"], DEFAULT_TIMEOUT) {
         Ok(out) if out.success => ConnectorStatus::Ready,
         Ok(_) => ConnectorStatus::NeedsAuth,
         Err(RunError::NotFound { .. }) => ConnectorStatus::Unavailable,
         Err(_) => ConnectorStatus::Degraded,
-    }
+    };
+    *cache = Some((Instant::now(), status));
+    status
+}
+
+/// Forget the cached answer.
+///
+/// Called when the account configuration changes, so a fresh sign-in shows
+/// up immediately instead of after the TTL. Without this the user fixes
+/// their token, sees the dot stay red, and reasonably concludes it did not
+/// work.
+pub fn forget_ready() {
+    *READY_CACHE.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
 
 // -- Shaping the answers ------------------------------------------------------
@@ -423,7 +629,7 @@ impl Connector for GithubConnector {
                 let prs = output.get("pullRequests")?.as_array()?;
                 if prs.is_empty() {
                     return Some(format!(
-                        "No open pull requests in {}.",
+                        "No pull requests found in {}.",
                         output.get("repo")?.as_str()?
                     ));
                 }
@@ -490,16 +696,30 @@ impl Connector for GithubConnector {
             "github.list_prs" => {
                 let target: ProjectRef = parse(input)?;
                 let (project, repo) = repo_for_project(ctx.conn, target.project_id)?;
-                let value = gh_json(&[
+                // Every state, not just open.
+                //
+                // `gh pr list` defaults to open, so a merged pull request was
+                // invisible: asking "is there a PR for this ticket" answered
+                // "no" for work that had already shipped, which is the most
+                // misleading answer available.
+                let mut args: Vec<&str> = vec![
                     "pr",
                     "list",
                     "--repo",
                     &repo,
+                    "--state",
+                    "all",
                     "--limit",
                     PR_LIMIT,
                     "--json",
                     "number,title,state,isDraft,url,author",
-                ])?;
+                ];
+                let search = target.query.unwrap_or_default();
+                if !search.trim().is_empty() {
+                    args.push("--search");
+                    args.push(search.trim());
+                }
+                let value = gh_json_as(ctx.conn, &repo, &args)?;
                 json(serde_json::json!({
                     "project": project,
                     "repo": repo,
@@ -511,7 +731,10 @@ impl Connector for GithubConnector {
                 let target: PrRef = parse(input)?;
                 let (_, repo) = repo_for_project(ctx.conn, target.project_id)?;
                 let number = target.number.to_string();
-                let value = gh_json(&[
+                let value = gh_json_as(
+                    ctx.conn,
+                    &repo,
+                    &[
                     "pr",
                     "view",
                     &number,
@@ -519,7 +742,8 @@ impl Connector for GithubConnector {
                     &repo,
                     "--json",
                     "number,title,state,isDraft,url,author,mergeable,statusCheckRollup",
-                ])?;
+                    ],
+                )?;
 
                 let checks = summarise_checks(value.get("statusCheckRollup"));
                 // The rollup itself is dropped: it is long, and every question
@@ -537,12 +761,24 @@ impl Connector for GithubConnector {
                 let target: PrRef = parse(input)?;
                 let (_, repo) = repo_for_project(ctx.conn, target.project_id)?;
                 let number = target.number.to_string();
-                let value =
-                    gh_json(&["pr", "view", &number, "--repo", &repo, "--json", "comments"])?;
+                // Both kinds: a PR's conversation has `comments`, but a reviewer
+                // who leaves feedback through the review flow shows up under
+                // `reviews`, not `comments`. Pulling only one dropped half the
+                // people from the tally, which is how a PR with two reviewers
+                // showed one.
+                let value = gh_json_as(
+                    ctx.conn,
+                    &repo,
+                    &[
+                        "pr", "view", &number, "--repo", &repo, "--json",
+                        "comments,reviews",
+                    ],
+                )?;
                 json(serde_json::json!({
                     "repo": repo,
                     "number": target.number,
-                    "comments": value.get("comments").cloned().unwrap_or(serde_json::json!([]))
+                    "comments": value.get("comments").cloned().unwrap_or(serde_json::json!([])),
+                    "reviews": value.get("reviews").cloned().unwrap_or(serde_json::json!([]))
                 }))
             }
 
@@ -568,6 +804,112 @@ impl Connector for GithubConnector {
                 }))
             }
 
+            "github.build_status" => {
+                let target: RepoRef = parse(input)?;
+                let repo = parse_repo(&target.repo).ok_or_else(|| ActionError::InvalidInput {
+                    detail: format!("\"{}\" is not a GitHub repository.", target.repo),
+                })?;
+                // The one most recent run, across every workflow, which is what
+                // the top of the repo's Actions page shows. `conclusion` is only
+                // set once `status` is "completed"; an in-flight run has a null
+                // conclusion, and the card reads both so a running build is not
+                // mistaken for a failed one.
+                let value = gh_json_as(
+                    ctx.conn,
+                    &repo,
+                    &[
+                        "run",
+                        "list",
+                        "--repo",
+                        &repo,
+                        "--limit",
+                        "1",
+                        "--json",
+                        "number,displayTitle,headBranch,status,conclusion,workflowName,createdAt,url",
+                    ],
+                )?;
+                // `gh run list` returns an array; the card wants the single
+                // latest run, or null when the repo has never run a workflow.
+                let latest = value
+                    .as_array()
+                    .and_then(|runs| runs.first())
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null);
+                json(serde_json::json!({
+                    "repo": repo,
+                    "run": latest,
+                }))
+            }
+
+            "github.my_prs" => {
+                // For the standup: the user's own PRs, in every tracked repo,
+                // touched since the given date. Per repo rather than one
+                // `gh search`, because each repo is asked as the account
+                // mapped to its owner: `@me` must mean the work account for
+                // work repositories, and a global search would ask as
+                // whichever account happens to be active.
+                let target: SinceRef = parse(input)?;
+                let since = valid_date(&target.since).ok_or_else(|| ActionError::InvalidInput {
+                    detail: format!("\"{}\" is not a YYYY-MM-DD date.", target.since),
+                })?;
+                let mut repos: Vec<String> = Vec::new();
+                if let Ok(mut stmt) = ctx.conn.prepare(
+                    "SELECT repository_url FROM projects WHERE repository_url IS NOT NULL",
+                ) {
+                    if let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(0)) {
+                        for url in rows.filter_map(Result::ok) {
+                            if let Some(repo) = parse_repo(&url) {
+                                if !repos.contains(&repo) {
+                                    repos.push(repo);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                let search = format!("updated:>={since}");
+                let mut prs: Vec<serde_json::Value> = Vec::new();
+                let mut errors: Vec<String> = Vec::new();
+                for repo in &repos {
+                    match gh_json_as(
+                        ctx.conn,
+                        repo,
+                        &[
+                            "pr",
+                            "list",
+                            "--repo",
+                            repo,
+                            "--author",
+                            "@me",
+                            "--state",
+                            "all",
+                            "--search",
+                            &search,
+                            "--limit",
+                            "20",
+                            "--json",
+                            "number,title,state,isDraft,url,updatedAt,mergedAt,reviewDecision,statusCheckRollup",
+                        ],
+                    ) {
+                        Ok(list) => {
+                            for pr in list.as_array().cloned().unwrap_or_default() {
+                                let checks = summarise_checks(pr.get("statusCheckRollup"));
+                                let mut shaped = pr.clone();
+                                if let Some(obj) = shaped.as_object_mut() {
+                                    obj.remove("statusCheckRollup");
+                                    obj.insert("checks".into(), json(checks)?);
+                                    obj.insert("repo".into(), serde_json::json!(repo));
+                                }
+                                prs.push(shaped);
+                            }
+                        }
+                        // One unreachable repo must not hide the rest.
+                        Err(e) => errors.push(format!("{repo}: {e}")),
+                    }
+                }
+                json(serde_json::json!({ "prs": prs, "errors": errors, "repos": repos.len() }))
+            }
+
             other => Err(ActionError::UnknownAction {
                 action_id: other.to_string(),
             }),
@@ -577,6 +919,100 @@ impl Connector for GithubConnector {
 
 #[cfg(test)]
 mod tests {
+
+    // -- Two identities on one machine ---------------------------------------
+
+    /// A database with the connector rows the resolver reads.
+    ///
+    /// Registration is what creates them; migrations alone leave the table
+    /// empty, so an UPDATE would match nothing and the resolver would look
+    /// broken when it was only unconfigured.
+    fn migrated() -> Connection {
+        let conn = Connection::open_in_memory().expect("open");
+        for (_, sql) in crate::db::migrations::MIGRATIONS {
+            conn.execute_batch(sql).expect("migrate");
+        }
+        crate::assistant::register_connectors(&conn).expect("register");
+        conn
+    }
+
+    fn production() -> &'static str {
+        include_str!("github_connector.rs")
+            .split_once("#[cfg(test)]")
+            .map(|(before, _)| before)
+            .expect("marker")
+    }
+
+    #[test]
+    fn only_a_plain_date_reaches_a_search_qualifier() {
+        assert_eq!(valid_date("2026-10-22"), Some("2026-10-22"));
+        for bad in ["2026-10-2", "2026/10/22", "2026-10-22 is:open", "x", "2026-1a-22"] {
+            assert!(valid_date(bad).is_none(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn a_token_never_reaches_the_command_line() {
+        // Every process on this machine can read another's `argv` through
+        // `ps`. The environment of a child is not in that output, which is
+        // the whole reason the token goes that way.
+        assert!(production().contains("(\"GH_TOKEN\", token.as_str())"));
+        assert!(
+            !production().contains("\"--token\""),
+            "a token must never be an argument"
+        );
+    }
+
+    #[test]
+    fn a_token_is_never_written_anywhere() {
+        // Fetched at the moment of use and dropped with the call. Nothing
+        // persists it, which is what keeps the narrowed claim true.
+        let getter = production()
+            .split_once("fn token_for")
+            .map(|(_, rest)| rest)
+            .expect("the token reader");
+        let body = &getter[..getter.find("\n}").expect("end")];
+        for forbidden in ["INSERT", "UPDATE", "write", "store_keychain", "log::"] {
+            assert!(!body.contains(forbidden), "found {forbidden}");
+        }
+    }
+
+    #[test]
+    fn nothing_switches_the_active_account() {
+        // Switching globally is what breaks pushing a personal repository
+        // from a terminal that shares the same `gh`.
+        assert!(
+            !production().contains("\"switch\""),
+            "the active account must not be changed"
+        );
+    }
+
+    #[test]
+    fn an_unmapped_owner_uses_the_active_account() {
+        // The behaviour every existing setup already has: no config, no
+        // change. Guessing a different account would be worse than letting
+        // GitHub's own "could not find" explain itself.
+        let conn = migrated();
+        assert_eq!(account_for(&conn, "someone/thing"), None);
+    }
+
+    #[test]
+    fn a_mapped_owner_resolves_to_its_account() {
+        let conn = migrated();
+        conn.execute(
+            "UPDATE connectors SET config_json = ?1 WHERE connector_id = 'github'",
+            [r#"{"accounts":{"acme":"work-login"}}"#],
+        )
+        .expect("config");
+        assert_eq!(account_for(&conn, "acme/ui").as_deref(), Some("work-login"));
+        // Only the owner decides, so every repository under it is covered
+        // without being listed.
+        assert_eq!(
+            account_for(&conn, "acme/anything-else").as_deref(),
+            Some("work-login")
+        );
+        assert_eq!(account_for(&conn, "personal/thing"), None);
+    }
     use super::*;
     use serde_json::json as j;
 
@@ -770,5 +1206,53 @@ mod tests {
         let production = include_str!("github_connector.rs");
         assert!(production.contains("gh auth login"));
         assert!(production.contains("brew install gh"));
+    }
+
+    #[test]
+    fn gh_is_never_run_by_bare_name() {
+        // The defect this prevents: a macOS application bundle inherits
+        // launchd's PATH, which has no Homebrew on it. `Command::new("gh")`
+        // then fails with NotFound, and NEXUS tells the user to install a
+        // tool they already have. Every call site must name a path.
+        let production = include_str!("github_connector.rs")
+            .split_once("#[cfg(test)]")
+            .map(|(before, _)| before)
+            .expect("the file must keep its test module marker");
+        for bare in ["run(GH,", "run_with_env(GH,", "run(\"gh\"", "= \"gh\";"] {
+            assert!(
+                !production.contains(bare),
+                "gh must be resolved to an absolute path, found {bare}"
+            );
+        }
+        assert!(
+            production.contains("GH_CANDIDATES"),
+            "the candidate path list must remain the way gh is found"
+        );
+    }
+
+    #[test]
+    fn every_candidate_gh_path_is_absolute() {
+        for path in GH_CANDIDATES {
+            assert!(
+                path.starts_with('/'),
+                "{path} would be resolved against PATH, which is the bug"
+            );
+        }
+    }
+
+    #[test]
+    fn a_present_gh_resolves_to_a_path_rather_than_a_name() {
+        // Only asserts the property when `gh` is genuinely installed here,
+        // so the suite still passes on a machine without it.
+        if GH_CANDIDATES
+            .into_iter()
+            .any(|p| std::path::Path::new(p).exists())
+        {
+            assert!(
+                gh_bin().starts_with('/'),
+                "an installed gh must be run by path, got {}",
+                gh_bin()
+            );
+        }
     }
 }

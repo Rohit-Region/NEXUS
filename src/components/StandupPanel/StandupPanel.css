@@ -1,0 +1,127 @@
+/*
+ * The standup card. Sits with the Jira and PR cards it draws from, in the
+ * same quiet card shape, with a mono textarea since the result is pasted
+ * into chat as plain text.
+ */
+.standup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.standup__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: var(--space-xs);
+  border-bottom: 1px solid var(--color-border);
+  color: #f472b6;
+}
+
+.standup__title {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.standup__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 4px 11px;
+  background: transparent;
+  border: 1px solid rgba(244, 114, 182, 0.45);
+  border-radius: var(--radius-sm);
+  color: #f472b6;
+  cursor: pointer;
+}
+
+.standup__btn:hover:not(:disabled) {
+  background: rgba(244, 114, 182, 0.1);
+}
+
+.standup__btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.standup__hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+
+.standup__notes {
+  margin: 0;
+  padding: 6px 10px 6px 24px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  border-radius: var(--radius-sm);
+}
+
+.standup__text {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  padding: 10px;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  resize: vertical;
+}
+
+.standup__text:focus {
+  outline: none;
+  border-color: rgba(244, 114, 182, 0.5);
+}
+
+.standup__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.standup__meeting {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--space-sm) var(--space-md);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.standup__meeting-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.standup__related {
+  margin: 0;
+  padding-left: 18px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+}

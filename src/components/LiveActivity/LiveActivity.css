@@ -91,19 +91,31 @@
 
 .live__what {
   font-size: 12px;
+  line-height: 1.4;
   color: var(--color-text-secondary);
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-/* Only present on a failure, and then it is the most useful line in the row. */
+/* Only present on a failure, and then it is the most useful line in the row,
+   which is exactly why it must not be the one that gets cut. It used to end
+   "Not signed in to Microsoft. Run the si..." and stop before the sentence
+   reached the instruction. Three lines: a connector's complaint is the one
+   piece of text here worth reading in full. */
 .live__why {
   font-size: 11px;
+  line-height: 1.4;
   color: var(--color-accent);
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .live__dot {

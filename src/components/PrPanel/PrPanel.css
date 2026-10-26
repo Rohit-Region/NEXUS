@@ -1,0 +1,430 @@
+/*
+ * The branch card.
+ *
+ * Its hue is the purple this card was already using for a merged pull
+ * request, and its device is the graph: a spine down the left with one node
+ * per ticket, which is the shape every git client draws and so needs no
+ * explaining. A filled node has a pull request behind it, a hollow one does
+ * not, and the column of them answers "how much of this work has landed"
+ * before any of the words are read.
+ */
+.pr {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  background:
+    linear-gradient(
+      200deg,
+      rgba(168, 85, 247, 0.085) 0%,
+      rgba(168, 85, 247, 0.02) 30%,
+      var(--color-bg-secondary) 55%
+    );
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.pr__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: var(--space-xs);
+  border-bottom: 1px solid var(--color-border);
+  color: #c084fc;
+}
+
+.pr__title {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #c084fc;
+}
+
+.pr__refresh {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.pr__refresh:hover:not(:disabled) {
+  color: var(--color-accent);
+  border-color: var(--color-accent-dim);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .pr__refresh--busy {
+    animation: pr-spin 0.9s linear infinite;
+  }
+}
+
+@keyframes pr-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.pr__empty,
+.pr__error {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.pr__error {
+  color: var(--color-accent);
+}
+
+.pr__list {
+  position: relative;
+  list-style: none;
+  margin: 0;
+  /* Room on the left for the spine and its nodes. */
+  padding: 0 0 0 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* The spine. Faded at both ends so it reads as a length of track rather
+   than a border that failed to reach the edges. */
+.pr__list::before {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: 12px;
+  bottom: 12px;
+  width: 1px;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(168, 85, 247, 0.5) 14%,
+    rgba(168, 85, 247, 0.5) 86%,
+    transparent 100%
+  );
+  pointer-events: none;
+}
+
+.pr__row {
+  position: relative;
+  /* Column, so the reviewer chips sit under the PR rather than beside it.
+     The branch node is pinned near the top of the row below so it still lines
+     up with the PR line, not the middle of the taller stacked row. */
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px var(--space-sm);
+  border-radius: var(--radius-sm);
+}
+
+.pr__row::before {
+  content: '';
+  position: absolute;
+  left: -17px;
+  top: 13px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1px solid #a855f7;
+  background: var(--color-bg-primary);
+}
+
+/* Filled and lit when there is a pull request; hollow when there is not.
+   Never a tick either way: this says a PR exists, not that it is good. */
+.pr__row--open::before {
+  background: #a855f7;
+  box-shadow: 0 0 7px rgba(168, 85, 247, 0.75);
+}
+
+.pr__row--none::before {
+  border-color: var(--color-text-muted);
+}
+
+.pr__key {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  min-width: 74px;
+}
+
+.pr__link {
+  display: flex;
+  align-items: center;
+  /* Wraps rather than squeezing the check rollup to an ellipsis. The
+     rollup is the part that says whether the PR is safe to merge, so it is
+     the last thing that should lose its width to a narrow column. */
+  flex-wrap: wrap;
+  gap: 4px var(--space-sm);
+  flex: 1;
+  min-width: 0;
+  padding: 4px var(--space-sm);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.pr__link:hover {
+  background-color: var(--color-bg-tertiary);
+  border-color: var(--color-text-muted);
+}
+
+.pr__number {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-primary);
+}
+
+.pr__state {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+}
+
+.pr__state--open {
+  color: var(--color-status-online);
+}
+
+.pr__state--draft {
+  color: var(--color-text-muted);
+}
+
+.pr__state--merged {
+  color: #a855f7;
+}
+
+.pr__state--closed {
+  color: var(--color-accent);
+}
+
+/* The connector's own summary of the check rollup. Absent when unknown,
+   which is the point: nothing here should imply a pass it has not seen. */
+.pr__checks {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--color-text-muted);
+  /* A basis of zero with a grow of one so it takes the rest of the first
+     line when there is one, and drops to its own line when there is not. */
+  flex: 1 1 0;
+  min-width: 90px;
+}
+
+.pr__comments {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-secondary);
+}
+
+/* No pull request yet. Stated plainly and quietly: it is the normal state
+   for a ticket somebody has only just picked up. */
+.pr__none {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+
+
+/*
+ * Could not ask GitHub at all.
+ *
+ * Deliberately not styled like `no PR`: one is an answer about the
+ * repository and the other is this card admitting it has none. Given the
+ * accent so it reads as something to fix.
+ */
+.pr__unasked {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+}
+
+.pr__why {
+  flex: 1;
+  min-width: 0;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+/* One PR per row now, so it carries the title. Wraps rather than truncating,
+   like every other card in this column. */
+.pr__what {
+  flex: 1 1 40%;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-text-primary);
+  text-align: left;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.pr__count {
+  flex: 1;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Which repo the PR is in. Small and last, because the title already says
+   what it is; this says where. */
+.pr__repo {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+.pr__blocked {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-xs) 0 0;
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pr__blocked-row {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+  opacity: 0.8;
+}
+
+/* Who has commented on a PR, and how many each left. A row of small chips
+   under the PR, so "there are comments" becomes "these people are waiting". */
+.pr__reviewers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 0 2px 2px;
+}
+
+.pr__reviewer {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  padding: 1px 6px 1px 7px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-text-secondary);
+}
+
+.pr__reviewer-name {
+  max-width: 14ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pr__reviewer-count {
+  min-width: 14px;
+  text-align: center;
+  font-weight: 600;
+  color: #c084fc;
+  background: rgba(168, 85, 247, 0.12);
+  border-radius: 999px;
+  padding: 0 3px;
+}
+
+/* Reviewer chips are buttons now: clicking one shows what they said. */
+.pr__reviewer {
+  cursor: pointer;
+  background: transparent;
+}
+
+.pr__reviewer:hover {
+  border-color: var(--color-text-muted);
+  color: var(--color-text-primary);
+}
+
+.pr__reviewer--open {
+  border-color: #c084fc;
+  color: var(--color-text-primary);
+}
+
+/* The expanded comment, read short. */
+.pr__comment {
+  margin: 2px 0 4px 2px;
+  padding: var(--space-sm);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-left: 2px solid #c084fc;
+  border-radius: var(--radius-sm);
+}
+
+.pr__comment-who {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #c084fc;
+}
+
+.pr__comment-body {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.pr__comment-body--empty {
+  font-style: italic;
+  color: var(--color-text-muted);
+}

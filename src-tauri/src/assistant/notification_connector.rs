@@ -652,10 +652,23 @@ pub fn undecodable_count() -> i64 {
     *UNDECODABLE.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Forget what has been announced. Tests only; the process is the lifetime.
+/// Serialises the tests that use the process-wide `ANNOUNCED` list.
+///
+/// Tests run in parallel and `ANNOUNCED` is one list for the whole process, so
+/// one test clearing or filling it between another test's two reads made that
+/// other test fail at random (seen as `the_announcing_path_says_a_thing_once`
+/// failing in a full run and passing alone).
 #[cfg(test)]
-fn forget_announced() {
+static ANNOUNCED_TESTS: Mutex<()> = Mutex::new(());
+
+/// Forget what has been announced, and hold the list for the calling test
+/// until the returned guard drops. Tests only; the process is the lifetime.
+#[cfg(test)]
+#[must_use = "bind it (`let _held = forget_announced();`) or another test can interleave"]
+fn forget_announced() -> std::sync::MutexGuard<'static, ()> {
+    let held = ANNOUNCED_TESTS.lock().unwrap_or_else(|e| e.into_inner());
     ANNOUNCED.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    held
 }
 
 pub struct NotificationConnector;
@@ -1127,7 +1140,7 @@ mod tests {
     fn the_same_notification_is_not_announced_twice() {
         // The poll runs every few seconds over a five-minute window, so
         // without this every message would be read out around forty times.
-        forget_announced();
+        let _held = forget_announced();
         assert!(!already_announced(9_001), "first sight is new");
         assert!(already_announced(9_001), "second is not");
         assert!(!already_announced(9_002));
@@ -1357,7 +1370,7 @@ mod tests {
         // A message older than the asking window is still one the user asked
         // about when they said "all". The store prunes itself, so "all" is
         // bounded by macOS rather than by NEXUS guessing at a horizon.
-        forget_announced();
+        let _held = forget_announced();
         let conn = test_conn();
         opt_in(&conn, "whatsapp");
         let old = fake_store("net.whatsapp.whatsapp", apple(NOW, ASKED_SECONDS * 4));
@@ -1382,7 +1395,7 @@ mod tests {
         // The end-to-end test that should have existed from the start. Query,
         // app match, freshness and decode, together, against the real schema.
         // Every previous defect here lived in the seam between two of those.
-        forget_announced();
+        let _held = forget_announced();
         let conn = test_conn();
         opt_in(&conn, "whatsapp");
         let store = fake_store("net.whatsapp.whatsapp", apple(NOW, 60));
@@ -1400,7 +1413,7 @@ mod tests {
     #[test]
     fn a_versioned_identifier_is_read_end_to_end_too() {
         // `com.microsoft.teams2` for a user who typed "Teams".
-        forget_announced();
+        let _held = forget_announced();
         let conn = test_conn();
         opt_in(&conn, "Teams");
         let store = fake_store("com.microsoft.teams2", apple(NOW, 30));
@@ -1410,7 +1423,7 @@ mod tests {
 
     #[test]
     fn an_unwatched_app_and_a_stale_message_are_both_left_out() {
-        forget_announced();
+        let _held = forget_announced();
         let conn = test_conn();
         opt_in(&conn, "whatsapp");
 
@@ -1430,7 +1443,7 @@ mod tests {
 
     #[test]
     fn the_announcing_path_says_a_thing_once() {
-        forget_announced();
+        let _held = forget_announced();
         let conn = test_conn();
         opt_in(&conn, "whatsapp");
         let store = fake_store("net.whatsapp.whatsapp", apple(NOW, 30));

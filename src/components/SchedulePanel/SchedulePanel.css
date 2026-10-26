@@ -1,0 +1,274 @@
+/*
+ * The schedule card.
+ *
+ * Fifth card, fifth hue: a cold blue, which is the one temperature the other
+ * four do not occupy. Its device is the strip, and the strip is the reason
+ * this card is worth its space: a list of times tells you when things are,
+ * but the shape tells you where the gaps are, which is the question actually
+ * being asked when somebody glances at their day.
+ */
+.sched {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  background:
+    linear-gradient(
+      120deg,
+      rgba(56, 189, 248, 0.08) 0%,
+      rgba(56, 189, 248, 0.02) 30%,
+      var(--color-bg-secondary) 55%
+    );
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.sched__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: var(--space-xs);
+  border-bottom: 1px solid var(--color-border);
+  color: #38bdf8;
+}
+
+.sched__title {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.sched__count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.sched__refresh {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.sched__refresh:hover:not(:disabled) {
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.45);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .sched__refresh--busy {
+    animation: sched-spin 0.9s linear infinite;
+  }
+}
+
+@keyframes sched-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/*
+ * The only text this card renders besides its meetings.
+ *
+ * There is no empty state: a day with nothing on it removes the whole card,
+ * so anything appearing here is a failure. Accent-coloured for that reason,
+ * because it is something to fix rather than something to read.
+ */
+.sched__error {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-accent);
+}
+
+/* ── The strip ────────────────────────────────────────────────────────── */
+
+.sched__strip {
+  position: relative;
+  height: 18px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(
+    90deg,
+    rgba(56, 189, 248, 0.05),
+    rgba(56, 189, 248, 0.09)
+  );
+  border: 1px solid var(--color-border);
+  overflow: hidden;
+}
+
+.sched__block {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  border-radius: 2px;
+  background: rgba(56, 189, 248, 0.55);
+}
+
+/* The one you are in. Accent rather than blue, because it is the only thing
+   on this card that is true right now. */
+.sched__block--now {
+  background: var(--color-accent);
+  box-shadow: 0 0 8px rgba(230, 57, 70, 0.6);
+}
+
+/* Where the day has got to. A hairline, not a block: it marks an instant. */
+.sched__now {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--color-text-primary);
+  box-shadow: 0 0 6px rgba(245, 245, 245, 0.7);
+}
+
+.sched__scale {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── The list ─────────────────────────────────────────────────────────── */
+
+.sched__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sched__row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  padding: 5px var(--space-sm);
+  border-left: 2px solid transparent;
+  border-radius: var(--radius-sm);
+}
+
+.sched__row--now {
+  border-left-color: var(--color-accent);
+  background-color: var(--color-bg-tertiary);
+}
+
+.sched__row--next {
+  border-left-color: #38bdf8;
+}
+
+/* Done with. Dimmed rather than hidden: what you have already sat through is
+   still how you got to now. */
+.sched__row--past {
+  opacity: 0.45;
+}
+
+.sched__when {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+}
+
+.sched__dash {
+  color: var(--color-text-muted);
+  padding: 0 1px;
+}
+
+/* Wraps rather than truncates, like every other card here. A meeting title is
+   somebody else's sentence and the end of it is often the useful half. */
+.sched__what {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-text-primary);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.sched__tag {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  color: var(--color-accent);
+}
+
+.sched__tag--next {
+  color: #38bdf8;
+}
+
+/* Which calendar answered, said quietly. */
+.sched__source {
+  margin: 0;
+  padding-top: var(--space-xs);
+  border-top: 1px solid var(--color-border);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+/* The calendar-permission prompt, as an action rather than a sentence to obey.
+   Blue to match the card, because it is the way forward, not a failure. */
+.sched__permission {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-sm);
+}
+
+.sched__grant {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 6px 14px;
+  background: transparent;
+  border: 1px solid rgba(56, 189, 248, 0.5);
+  border-radius: var(--radius-sm);
+  color: #38bdf8;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.sched__grant:hover {
+  background-color: rgba(56, 189, 248, 0.12);
+  border-color: #38bdf8;
+}
+
+/* A clear day, said plainly, so the card stays visible rather than vanishing. */
+.sched__clear {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
