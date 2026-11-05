@@ -1,3 +1,4 @@
+pub mod ipos;
 pub mod news;
 pub mod phone_calls;
 pub mod portfolio_chat;
@@ -2238,6 +2239,11 @@ pub struct PortfolioGroup {
     /// holdings' when every one is known; `None` rather than a partial sum.
     pub invested: Option<f64>,
     pub gain: Option<f64>,
+    /// A ULIP whose premium is paid but not yet turned into units: valued at
+    /// what was paid, with no gain, rather than as a total loss.
+    pub units_pending: bool,
+    /// The policy has a fund switch report.
+    pub switch_report: bool,
 }
 
 /// The whole portfolio, priced live.
@@ -4648,6 +4654,21 @@ pub fn nexus_portfolio(state: State<'_, DbState>) -> Result<Portfolio, String> {
         {
             groups.insert(name, invested);
         }
+        // A policy's premiums booked in Spending add to what was paid into
+        // it, so a monthly AutoPay counts without being typed in. The stored
+        // amount is only what the bank messages never showed.
+        let mut pstmt = conn
+            .prepare("SELECT payee, amount_paise FROM expenses WHERE category IN ('Investments', 'Mutual Fund')")
+            .map_err(|e| format!("Query error: {e}"))?;
+        for (payee, paise) in pstmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
+            .map_err(|e| format!("Query error: {e}"))?
+            .flatten()
+        {
+            if let Some(group) = crate::assistant::portfolio_chat::policy_of_payee(&payee) {
+                *groups.entry(group.to_string()).or_insert(0.0) += paise as f64 / 100.0;
+            }
+        }
         (rows, groups)
     };
 
@@ -4773,7 +4794,15 @@ pub fn nexus_portfolio(state: State<'_, DbState>) -> Result<Portfolio, String> {
             let invested = group_invested.get(&name).copied().filter(|v| *v > 0.0).or_else(|| {
                 members.iter().map(|m| m.invested).sum::<Option<f64>>()
             });
-            groups.push(PortfolioGroup { gain: invested.map(|i| value - i), name, value, invested });
+            let units_pending = invested.is_some() && members.iter().all(|m| m.kind == "ulip" && m.quantity == 0.0);
+            let switch_report = crate::assistant::ulip_switch::policy(&name).is_some();
+            if units_pending {
+                let paid = invested.unwrap_or_default();
+                total_value += paid;
+                groups.push(PortfolioGroup { gain: None, name, value: paid, invested, units_pending, switch_report });
+            } else {
+                groups.push(PortfolioGroup { gain: invested.map(|i| value - i), name, value, invested, units_pending, switch_report });
+            }
         }
     }
 

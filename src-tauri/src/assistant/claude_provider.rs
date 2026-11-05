@@ -55,6 +55,55 @@ pub(crate) fn binary() -> Option<&'static str> {
         .find(|path| std::path::Path::new(path).exists())
 }
 
+/// Send a prompt and return the reply as written, for callers that need a
+/// longer brief than `AiContext` carries and parse the answer themselves.
+///
+/// The caller must check the external-reasoning switch first: this reaches
+/// Anthropic exactly as `reason` does.
+pub fn complete(prompt: &str, timeout: Duration) -> Result<String, String> {
+    run(&["-p", "--output-format", "text"], prompt, timeout)
+}
+
+/// As [`complete`], but Claude may search and read the web, for questions
+/// whose answer is not in anything NEXUS can fetch itself. `--tools` makes
+/// the two web tools the only built-in ones, and `--strict-mcp-config` with
+/// no config loads none of the user's MCP servers, so no file, command or
+/// connected service on this machine is reachable. `--allowedTools` lets the
+/// web tools run without a prompt nobody is there to answer.
+pub fn research(prompt: &str, timeout: Duration) -> Result<String, String> {
+    run(
+        &[
+            "-p",
+            "--output-format",
+            "text",
+            "--tools",
+            "WebSearch,WebFetch",
+            "--allowedTools",
+            "WebSearch,WebFetch",
+            "--strict-mcp-config",
+        ],
+        prompt,
+        timeout,
+    )
+}
+
+fn run(args: &[&str], prompt: &str, timeout: Duration) -> Result<String, String> {
+    let program = binary().ok_or("Claude Code is not installed.")?;
+    let out = run_with_stdin(program, args, prompt, timeout)
+        .map_err(|e| format!("Claude Code did not answer: {e}"))?;
+    if !out.success {
+        let detail = out.stderr.trim();
+        return Err(if detail.contains("login") || detail.contains("auth") {
+            "Claude Code is not signed in. Run `claude` in a terminal once.".to_string()
+        } else if detail.is_empty() {
+            "Claude Code exited without answering.".to_string()
+        } else {
+            format!("Claude Code: {detail}")
+        });
+    }
+    Ok(out.stdout)
+}
+
 pub struct ClaudeProvider;
 
 impl ReasoningProvider for ClaudeProvider {

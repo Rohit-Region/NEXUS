@@ -14,6 +14,7 @@ import { RetirementPanel } from './RetirementPanel';
 import { BillsPanel } from './BillsPanel';
 import { SpendingPanel } from './Spending/SpendingPanel';
 import { PortfolioChat } from './PortfolioChat';
+import { PolicyPage } from './Policy/PolicyPage';
 import './MoneyScreen.css';
 
 /** The three ways to add to the portfolio, each priced differently. */
@@ -58,8 +59,10 @@ function signed(n: number): string {
  * priced in INR through the same path. You enter what you hold; NEXUS fetches
  * the price and totals it.
  *
- * It informs, it never advises. There is no rating, no target, no "buy" here,
- * by design: a tool that pretends to pick winners is how people lose money.
+ * The list informs, it never advises: no rating, no target, no "buy", by
+ * design, since a tool that pretends to pick winners is how people lose money.
+ * The one judgement is a ULIP's switch report, and it is a written-out rule
+ * over the funds' records that shows its working, not a forecast.
  * This is the first slice of the Money section; savings, goals, retirement and
  * bill reminders follow.
  */
@@ -77,6 +80,8 @@ export function MoneyScreen() {
   const [fundResults, setFundResults] = useState<FundMatch[]>([]);
   const [picked, setPicked] = useState<FundMatch | null>(null);
   const [searching, setSearching] = useState(false);
+  // The policy whose own page is open in place of the portfolio list.
+  const [policy, setPolicy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setBusy(true);
@@ -168,6 +173,7 @@ export function MoneyScreen() {
   );
 
   const holdings = data?.holdings ?? [];
+  const policyGroup = policy ? data?.groups.find((g) => g.name === policy) : undefined;
   const dayUp = (data?.totalDayChange ?? 0) >= 0;
 
   return (
@@ -214,7 +220,9 @@ export function MoneyScreen() {
       {tab === 'retirement' && <RetirementPanel />}
       {tab === 'bills' && <BillsPanel />}
 
-      {tab === 'portfolio' && (
+      {tab === 'portfolio' && policyGroup && <PolicyPage group={policyGroup} onBack={() => setPolicy(null)} />}
+
+      {tab === 'portfolio' && !policyGroup && (
       <>
       <PortfolioChat onApplied={() => void load()} />
 
@@ -412,10 +420,17 @@ export function MoneyScreen() {
           {(data?.groups ?? []).map((g) => (
             <Fragment key={g.name}>
               <li className="money__group">
-                <span className="money__group-name">{g.name}</span>
+                {g.switchReport ? (
+                  <button className="money__group-name money__group-link" type="button" onClick={() => setPolicy(g.name)}>
+                    {g.name} <span className="money__group-open">Fund report →</span>
+                  </button>
+                ) : (
+                  <span className="money__group-name">{g.name}</span>
+                )}
                 <span className="money__group-figs">
                   <span>{inr(g.value)}</span>
                   {g.invested !== null && <span className="money__group-sub">invested {inr(g.invested)}</span>}
+                  {g.unitsPending && <span className="money__group-sub">units not allotted yet</span>}
                   {g.gain !== null && (
                     <span className={`money__chg money__chg--${g.gain >= 0 ? 'up' : 'down'}`}>
                       {signed(g.gain)}

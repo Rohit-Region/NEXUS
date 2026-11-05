@@ -16,6 +16,7 @@ import {
   spendSetBalance,
   spendSetBudget,
   spendSetIncome,
+  spendSplit,
   spendStatus,
   spendSync,
   spendUpdate,
@@ -31,6 +32,7 @@ import { BalanceStrip } from './BalanceStrip';
 import { SpendBreakdown } from './SpendBreakdown';
 import { SpendTransactions, type TxFilter } from './SpendTransactions';
 import { ExpenseForm } from './ExpenseForm';
+import { SplitEditor } from './SplitEditor';
 import { ago, dayLabel, errorText, inr, monthLabel, shiftMonth, toInput } from './format';
 import './Spending.css';
 
@@ -207,6 +209,9 @@ export function SpendingPanel() {
   const daysSoFar = isCurrent ? Number(data.today.slice(8)) : data.daysInMonth;
   const avg = daysSoFar > 0 ? Math.round(data.spendPaise / daysSoFar) : 0;
   const biggest = data.days.reduce((a, b) => (b.spendPaise > a.spendPaise ? b : a), data.days[0]);
+  // Last month's full totals stay in view on the current month, so the 1st
+  // does not make them look gone.
+  const lastMonth = isCurrent ? (data.history[data.history.length - 2] ?? null) : null;
   const change = data.previousPaise > 0 ? Math.round(((data.spendPaise - data.previousPaise) / data.previousPaise) * 100) : null;
 
   return (
@@ -244,14 +249,14 @@ export function SpendingPanel() {
         </span>
         {status?.connected && (
           <button
-            className={`spend-icon${syncing ? ' spend-icon--busy' : ''}`}
+            className={`spend-icon spend-icon--text${syncing ? ' spend-icon--busy' : ''}`}
             type="button"
             onClick={() => void sync()}
             disabled={syncing}
-            aria-label="Sync bank messages now"
-            title="Sync bank messages now"
+            title="Fetch new bank messages from your phone now"
           >
             <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
+            {syncing ? 'Syncing…' : 'Sync now'}
           </button>
         )}
         <button
@@ -388,11 +393,33 @@ export function SpendingPanel() {
           )}
         </div>
       </div>
+      {lastMonth && (
+        <button className="spend-last" type="button" onClick={() => setMonth(lastMonth.month)}>
+          <span className="spend-last__label">{monthLabel(lastMonth.month)}</span>
+          <span>
+            Spent <strong>{inr(lastMonth.spendPaise, true)}</strong>
+            {lastMonth.savings.savedPaise !== null && (
+              <>
+                {' '}
+                · saved <strong>{inr(lastMonth.savings.savedPaise, true)}</strong>
+              </>
+            )}
+          </span>
+          <span className="spend-link">Open</span>
+        </button>
+      )}
+
       <BalanceStrip
         balances={data.balances}
         onSet={(account, amount) =>
           void spendSetBalance(account, amount)
-            .then(() => after(`${account} balance set to ${inr(Math.round(amount * 100))}.`))
+            .then(() =>
+              after(
+                amount < 0
+                  ? `${account}: ${inr(Math.round(-amount * 100))} owed.`
+                  : `${account} balance set to ${inr(Math.round(amount * 100))}.`,
+              ),
+            )
             .catch(fail)
         }
       />
@@ -501,11 +528,22 @@ export function SpendingPanel() {
 
       {editing?.mode === 'edit' && (
         <ExpenseForm
-          title="Edit payment"
+          title="Payment"
           initial={toInput(editing.expense)}
           categories={data.allCategories}
           accounts={accounts}
           submitLabel="Save"
+          extra={
+            editing.expense.kind === 'spend' && (
+              <SplitEditor
+                expense={editing.expense}
+                onSave={async (shares) => {
+                  await spendSplit(editing.expense.id, shares);
+                  await after(shares.length ? 'Split saved. Only your share counts as spending.' : 'Split removed.');
+                }}
+              />
+            )
+          }
           offerRemember
           onSubmit={async (input, remember) => {
             await spendUpdate(editing.expense.id, input, remember);

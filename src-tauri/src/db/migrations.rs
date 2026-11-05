@@ -657,4 +657,114 @@ pub const MIGRATIONS: &[(i64, &str)] = &[
         );
         ",
     ),
+    (
+        24,
+        "
+        -- Migration 024: the pick journal also records growth stocks
+        -- (affordable mid and small caps). SQLite cannot alter a CHECK, so
+        -- the table is rebuilt with the wider one and its rows carried over.
+        CREATE TABLE pick_log_new (
+            day     INTEGER NOT NULL,
+            kind    TEXT    NOT NULL CHECK (kind IN ('stock', 'growth', 'fund')),
+            symbol  TEXT    NOT NULL,
+            score   REAL    NOT NULL,
+            verdict TEXT    NOT NULL,
+            price   REAL    NOT NULL,
+            bench   REAL,
+            factors TEXT    NOT NULL DEFAULT '{}',
+            ret5    REAL,
+            ret20   REAL,
+            ret60   REAL,
+            bench5  REAL,
+            bench20 REAL,
+            bench60 REAL,
+            PRIMARY KEY (day, kind, symbol)
+        );
+        INSERT INTO pick_log_new SELECT day, kind, symbol, score, verdict, price, bench, factors,
+            ret5, ret20, ret60, bench5, bench20, bench60 FROM pick_log;
+        DROP TABLE pick_log;
+        ALTER TABLE pick_log_new RENAME TO pick_log;
+        ",
+    ),
+    (
+        25,
+        "
+        -- Migration 025: the pick journal records the three stock divisions
+        -- (steady, balanced, volatile), news-driven predictions, and the
+        -- user's own buys ('mine'), so each can be graded. Rebuilt again for
+        -- the wider CHECK, rows carried over.
+        CREATE TABLE pick_log_new (
+            day     INTEGER NOT NULL,
+            kind    TEXT    NOT NULL CHECK (kind IN
+                        ('stock', 'growth', 'steady', 'balanced', 'volatile', 'fund', 'news', 'mine')),
+            symbol  TEXT    NOT NULL,
+            score   REAL    NOT NULL,
+            verdict TEXT    NOT NULL,
+            price   REAL    NOT NULL,
+            bench   REAL,
+            factors TEXT    NOT NULL DEFAULT '{}',
+            ret5    REAL,
+            ret20   REAL,
+            ret60   REAL,
+            bench5  REAL,
+            bench20 REAL,
+            bench60 REAL,
+            PRIMARY KEY (day, kind, symbol)
+        );
+        INSERT INTO pick_log_new SELECT day, kind, symbol, score, verdict, price, bench, factors,
+            ret5, ret20, ret60, bench5, bench20, bench60 FROM pick_log;
+        DROP TABLE pick_log;
+        ALTER TABLE pick_log_new RENAME TO pick_log;
+        ",
+    ),
+    (
+        26,
+        "
+        -- Migration 026: splitting a payment with other people. The user's
+        -- own part is what counts as their spending; null means all of it.
+        -- Each other person's part is owed back until marked settled.
+        ALTER TABLE expenses ADD COLUMN my_share_paise INTEGER;
+
+        CREATE TABLE IF NOT EXISTS expense_shares (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            expense_id   INTEGER NOT NULL REFERENCES expenses(id) ON DELETE CASCADE,
+            person       TEXT    NOT NULL,
+            amount_paise INTEGER NOT NULL CHECK (amount_paise > 0),
+            settled_at   INTEGER                -- unix seconds, null while owed
+        );
+        CREATE INDEX IF NOT EXISTS expense_shares_expense ON expense_shares (expense_id);
+        ",
+    ),
+    (
+        27,
+        "
+        -- Migration 027: a ULIP policy's terms and the holder's retirement,
+        -- which decide what suits it: how long premiums run, how long the
+        -- money stays, and when it starts moving to safety.
+        CREATE TABLE IF NOT EXISTS policy_plans (
+            name            TEXT    PRIMARY KEY,
+            started         TEXT    NOT NULL,          -- yyyy-mm-dd, first premium
+            monthly_premium REAL    NOT NULL CHECK (monthly_premium > 0),
+            pay_years       INTEGER NOT NULL,
+            term_years      INTEGER NOT NULL,
+            birth_year      INTEGER NOT NULL,
+            retire_age      INTEGER NOT NULL
+        );
+        ",
+    ),
+    (
+        28,
+        "
+        -- Migration 028: daily ULIP NAVs as NEXUS sees them, for insurers that
+        -- publish no history of their own (Tata AIA), so a fund's volatility
+        -- and chart fill in over time.
+        CREATE TABLE IF NOT EXISTS ulip_nav_log (
+            policy TEXT NOT NULL,
+            fund   TEXT NOT NULL,       -- the fund's label in the report
+            day    TEXT NOT NULL,       -- yyyy-mm-dd
+            nav    REAL NOT NULL CHECK (nav > 0),
+            PRIMARY KEY (policy, fund, day)
+        );
+        ",
+    ),
 ];

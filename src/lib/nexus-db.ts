@@ -384,6 +384,10 @@ export interface PortfolioGroup {
   value: number;
   invested: number | null;
   gain: number | null;
+  /** A ULIP paid into but not yet given units; valued at what was paid. */
+  unitsPending: boolean;
+  /** The policy has a fund switch report. */
+  switchReport: boolean;
 }
 
 export interface Portfolio {
@@ -1063,6 +1067,16 @@ export interface Expense {
   account: string;
   channel: string;
   note: string;
+  /** Your part of a split payment; null when not split. */
+  mySharePaise: number | null;
+  shares: ExpenseShare[];
+}
+
+/** Another person's part of a split payment. */
+export interface ExpenseShare {
+  id: number;
+  person: string;
+  amountPaise: number;
 }
 
 export interface SpendMonth {
@@ -1098,9 +1112,13 @@ export interface AccountBalance {
   balancePaise: number;
   /** Unix seconds when that balance was stated. */
   asOf: number;
-  source: 'sms' | 'manual';
+  source: 'sms' | 'manual' | '';
   /** Payments since then, already applied. */
   adjusted: number;
+  /** A credit card: balancePaise is what is owed, as a negative number. */
+  creditCard: boolean;
+  /** False for a card whose dues were never set: only this month's purchases. */
+  known: boolean;
 }
 
 export interface Savings {
@@ -1181,6 +1199,11 @@ export function spendUpdate(id: number, input: ExpenseInput, rememberPayee: bool
 
 export function spendDelete(id: number): Promise<void> {
   return invoke<void>('nexus_spend_delete', { id });
+}
+
+/** Split a payment; `shares` are the other people. An empty list undoes it. */
+export function spendSplit(id: number, shares: { person: string; amount: number }[]): Promise<void> {
+  return invoke<void>('nexus_spend_split', { id, shares });
 }
 
 /** Usual monthly income in rupees, used for months with none recorded; null clears it. */
@@ -1282,6 +1305,160 @@ export function portfolioChat(text: string): Promise<PortfolioPreview> {
 
 export function portfolioChatApply(actions: PortfolioAction[]): Promise<string[]> {
   return invoke<string[]>('nexus_portfolio_chat_apply', { actions });
+}
+
+export type UlipFundKind = 'equity' | 'balanced' | 'debt';
+
+/** One fund the policy can switch into. Returns are %, 3y and 5y a year. */
+export interface UlipFundStats {
+  label: string;
+  kind: UlipFundKind;
+  /** Fund management charge, % a year, when the insurer publishes it. */
+  fmc: number | null;
+  nav: number;
+  navDate: string;
+  launched: string | null;
+  r1m: number | null;
+  r3m: number | null;
+  r6m: number | null;
+  r1y: number | null;
+  cagr3y: number | null;
+  cagr5y: number | null;
+  volatility: number | null;
+  worstFall: number | null;
+  years: UlipYearReturn[];
+  rolling: UlipRolling | null;
+  /** With the held funds' daily moves over the past year, -1 to 1. */
+  correlation: number | null;
+  /** When returns come from a factsheet: the date they run to. */
+  returnsAsOf: string | null;
+  benchmark: string | null;
+  bench1y: number | null;
+  bench3y: number | null;
+}
+
+export interface UlipYearReturn {
+  year: number;
+  ret: number;
+  partial: boolean;
+}
+
+/** Every 1-year hold in the record, a week apart. */
+export interface UlipRolling {
+  holds: number;
+  positive: number;
+  median: number;
+  worst: number;
+  best: number;
+}
+
+export interface UlipIdea {
+  title: string;
+  body: string;
+  funds: string[];
+}
+
+export interface UlipFundHistory {
+  label: string;
+  /** [yyyy-mm-dd, NAV], oldest first. */
+  navs: [string, number][];
+}
+
+export function ulipFundHistory(group: string, labels: string[]): Promise<UlipFundHistory[]> {
+  return invoke<UlipFundHistory[]>('nexus_ulip_fund_history', { group, labels });
+}
+
+export type UlipVerdict = 'keep' | 'too-new' | 'watch' | 'switch';
+
+export interface UlipHeldFund {
+  label: string;
+  units: number;
+  value: number;
+  weight: number;
+  verdict: UlipVerdict;
+  reason: string;
+}
+
+/** A ULIP policy's terms and the holder's retirement. */
+export interface PolicyPlan {
+  started: string;
+  monthlyPremium: number;
+  payYears: number;
+  termYears: number;
+  birthYear: number;
+  retireAge: number;
+}
+
+export interface GlideStep {
+  year: number;
+  age: number;
+  equity: number;
+  note: string;
+}
+
+export interface PlanFit {
+  label: string;
+  score: number;
+  rank: number;
+  why: string;
+}
+
+export interface MixPart {
+  label: string;
+  share: number;
+  held: boolean;
+  why: string;
+}
+
+export interface PlanScenario {
+  label: string;
+  rate: number;
+  points: [number, number][];
+}
+
+export interface PlanAdvice {
+  plan: PolicyPlan;
+  age: number;
+  payUntil: string;
+  premiumsLeft: number;
+  paid: number;
+  toPay: number;
+  retireYear: number;
+  yearsToRetire: number;
+  maturityYear: number;
+  stage: string;
+  stageNote: string;
+  equityNow: number;
+  glide: GlideStep[];
+  fits: PlanFit[];
+  best: string | null;
+  bestWhy: string;
+  mix: MixPart[];
+  projection: PlanScenario[];
+  paidLine: [number, number][];
+}
+
+export function policyPlanSave(group: string, plan: PolicyPlan): Promise<void> {
+  return invoke<void>('nexus_policy_plan_save', { group, plan });
+}
+
+export interface UlipSwitchReport {
+  insurer: string;
+  asOf: string;
+  funds: UlipFundStats[];
+  held: UlipHeldFund[];
+  headline: string;
+  points: string[];
+  alternatives: string[];
+  ideas: UlipIdea[];
+  reviewOn: string | null;
+  failed: string[];
+  /** Advice for the policy's own terms, once they are saved. */
+  plan: PlanAdvice | null;
+}
+
+export function ulipSwitchReport(group: string, refresh: boolean): Promise<UlipSwitchReport> {
+  return invoke<UlipSwitchReport>('nexus_ulip_switch_report', { group, refresh });
 }
 
 // -- News ---------------------------------------------------------------------------
@@ -1388,6 +1565,8 @@ export interface StockHeadline {
 
 export interface StockFundamentals {
   displayName: string | null;
+  /** In ₹ Cr. */
+  marketCap: number | null;
   pe: number | null;
   industryPe: number | null;
   roe: number | null;
@@ -1508,25 +1687,243 @@ export interface PickLearning {
   factors: FactorSkill[];
 }
 
+/** One recorded day: mean returns per horizon, `null` until settled. */
+export interface DayReport {
+  day: number;
+  picked: number;
+  picksRet: (number | null)[];
+  avoidRet: (number | null)[];
+  benchRet: (number | null)[];
+}
+
 export interface PastPick {
   day: number;
   symbol: string;
   verdict: string;
   score: number;
+  price: number;
+  ret: (number | null)[];
   excess: (number | null)[];
+}
+
+export type PickKind = 'stock' | 'growth' | 'steady' | 'balanced' | 'volatile' | 'fund' | 'news' | 'mine';
+
+export interface KindRecord {
+  kind: PickKind;
+  benchmark: string;
+  days: number;
+  firstDay: number | null;
+  groups: PickGroupRecord[];
+  daily: DayReport[];
+  recent: PastPick[];
+  learning: PickLearning | null;
 }
 
 export interface TrackRecord {
   horizons: number[];
-  stockDays: number;
-  fundDays: number;
-  firstDay: number | null;
-  stocks: PickGroupRecord[];
-  funds: PickGroupRecord[];
-  learning: PickLearning;
-  recent: PastPick[];
+  kinds: KindRecord[];
 }
 
 export function pickTrackRecord(): Promise<TrackRecord> {
   return invoke<TrackRecord>('nexus_pick_track_record');
+}
+
+/** What a pick is expected to do over its holding period. Percentages. */
+export interface Prediction {
+  sessions: number;
+  expected: number;
+  low: number;
+  high: number;
+  /** Chance of ending higher, 0 to 1. */
+  probUp: number;
+  target: number;
+  stop: number;
+  /** "model", or the past calls it is based on. */
+  basis: string;
+}
+
+export interface GrowthPick {
+  symbol: string;
+  name: string;
+  industry: string;
+  index: string;
+  price: number;
+  shares: number;
+  cost: number;
+  changePct: number | null;
+  ret1w: number | null;
+  ret1m: number | null;
+  ret3m: number | null;
+  volatility: number | null;
+  turnoverCr: number | null;
+  score: number;
+  verdict: StockVerdict;
+  factors: ScoreFactor[];
+  reasons: string[];
+  risks: string[];
+  prediction: Prediction | null;
+  headlines: StockHeadline[];
+  buyNear: number | null;
+  support: number | null;
+  fundamentals: StockFundamentals;
+}
+
+export type DivisionKind = 'steady' | 'balanced' | 'volatile';
+
+export interface Division {
+  kind: DivisionKind;
+  label: string;
+  blurb: string;
+  sessions: number;
+  volLow: number;
+  volHigh: number;
+  picks: GrowthPick[];
+}
+
+export interface GrowthPicks {
+  divisions: Division[];
+  budget: number;
+  universe: number;
+  affordable: number;
+  ownedSkipped: string[];
+  heavySectors: string[];
+  bench3m: number | null;
+  gaps: string[];
+  fetchedAt: number;
+}
+
+export function growthPicks(budget: number, refresh = false): Promise<GrowthPicks> {
+  return invoke<GrowthPicks>('nexus_growth_picks', { budget, refresh });
+}
+
+export type RiskLevel = 'cautious' | 'balanced' | 'aggressive';
+
+export function investRisk(): Promise<RiskLevel> {
+  return invoke<RiskLevel>('nexus_invest_risk');
+}
+
+export function setInvestRisk(risk: RiskLevel): Promise<RiskLevel> {
+  return invoke<RiskLevel>('nexus_set_invest_risk', { risk });
+}
+
+export interface RadarRead {
+  title: string;
+  source: string;
+  link: string;
+  topic: string;
+}
+
+export interface SectorFlow {
+  industry: string;
+  stocks: number;
+  ret1w: number;
+  ret1m: number;
+  volumeRatio: number;
+  breadth: number;
+}
+
+export interface RadarStock {
+  symbol: string;
+  name: string;
+  industry: string;
+  direction: 'up' | 'down';
+  why: string;
+  named: boolean;
+  price: number;
+  ret1w: number | null;
+  ret1m: number | null;
+  vsSma50: number | null;
+  volatility: number | null;
+  plan: string;
+  prediction: Prediction | null;
+  fundamentals: StockFundamentals | null;
+  held: boolean;
+}
+
+export interface RadarEvent {
+  title: string;
+  summary: string;
+  whyIndia: string;
+  direction: 'up' | 'down';
+  horizon: 'days' | 'weeks' | 'months';
+  confidence: 'low' | 'medium' | 'high';
+  sectors: string[];
+  sources: number[];
+  stocks: RadarStock[];
+}
+
+export interface NewsRadar {
+  events: RadarEvent[];
+  inflows: SectorFlow[];
+  outflows: SectorFlow[];
+  read: RadarRead[];
+  provider: string;
+  feedback: string[];
+  generatedAt: number;
+}
+
+export function newsRadar(refresh = false): Promise<NewsRadar> {
+  return invoke<NewsRadar>('nexus_news_radar', { refresh });
+}
+
+export type IpoVerdict = 'apply' | 'consider' | 'skip' | 'watch';
+
+export interface Ipo {
+  name: string;
+  status: 'open' | 'upcoming';
+  /** `YYYY-MM-DD`, or empty when not announced. */
+  openDate: string;
+  closeDate: string;
+  listingDate: string;
+  priceLow: number | null;
+  priceHigh: number | null;
+  lotSize: number | null;
+  issueSizeCr: number | null;
+  gmp: number | null;
+  gmpPct: number | null;
+  subscribed: number | null;
+  qib: number | null;
+  verdict: IpoVerdict;
+  why: string;
+  business: string;
+  sources: string[];
+}
+
+export interface IpoDesk {
+  ipos: Ipo[];
+  rule: string;
+  provider: string;
+  generatedAt: number;
+}
+
+export interface IpoAllotment {
+  id: number;
+  name: string;
+  symbol: string;
+  shares: number;
+  issuePrice: number;
+  price: number | null;
+  gain: number | null;
+  gainPct: number | null;
+  note: string | null;
+}
+
+export function ipoDesk(refresh = false): Promise<IpoDesk> {
+  return invoke<IpoDesk>('nexus_ipo_desk', { refresh });
+}
+
+export function ipoAllotments(): Promise<IpoAllotment[]> {
+  return invoke<IpoAllotment[]>('nexus_ipo_allotments');
+}
+
+export function addIpoAllotment(name: string, symbol: string, shares: number, issuePrice: number): Promise<void> {
+  return invoke<void>('nexus_add_ipo_allotment', { name, symbol, shares, issuePrice });
+}
+
+export function setIpoSymbol(id: number, symbol: string): Promise<void> {
+  return invoke<void>('nexus_set_ipo_symbol', { id, symbol });
+}
+
+export function removeIpoAllotment(id: number): Promise<void> {
+  return invoke<void>('nexus_remove_ipo_allotment', { id });
 }

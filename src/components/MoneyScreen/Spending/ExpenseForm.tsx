@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import type { ExpenseInput, SpendKind } from '../../../lib/nexus-db';
 import { KIND_HINT, KIND_LABEL } from './format';
+
+const SAVED_CATEGORIES = new Set(['Investments', 'Mutual Fund']);
 
 interface Props {
   title: string;
@@ -16,6 +18,8 @@ interface Props {
   onSubmit: (input: ExpenseInput, remember: boolean) => Promise<void>;
   onDelete?: () => Promise<void>;
   onClose: () => void;
+  /** More sections below the fields. */
+  extra?: ReactNode;
 }
 
 const KINDS: SpendKind[] = ['spend', 'income', 'refund', 'transfer'];
@@ -32,6 +36,7 @@ export function ExpenseForm({
   onSubmit,
   onDelete,
   onClose,
+  extra,
 }: Props) {
   const [v, setV] = useState({ ...initial, amount: initial.amount ? String(initial.amount) : '' });
   const [remember, setRemember] = useState(true);
@@ -40,8 +45,16 @@ export function ExpenseForm({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const first = useRef<HTMLInputElement>(null);
 
+  // Money put into investments is kept, not spent; the backend books it as a
+  // transfer, so show that here too.
+  const setCategory = (category: string) =>
+    setV({ ...v, category, kind: v.kind === 'spend' && SAVED_CATEGORIES.has(category) ? 'transfer' : v.kind });
+
   useEffect(() => {
     first.current?.focus();
+  }, []);
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
@@ -135,7 +148,7 @@ export function ExpenseForm({
           </label>
           <label className="spend-form__field">
             <span>Category</span>
-            <select className="money__input" value={v.category} onChange={(e) => setV({ ...v, category: e.target.value })}>
+            <select className="money__input" value={v.category} onChange={(e) => setCategory(e.target.value)}>
               {categories.map((c) => (
                 <option key={c} value={c}>
                   {c}
@@ -170,6 +183,8 @@ export function ExpenseForm({
             Use this name, category and type for every payment to this payee, past and future
           </label>
         )}
+
+        {extra}
 
         {error && (
           <p className="spend-form__error" role="alert">

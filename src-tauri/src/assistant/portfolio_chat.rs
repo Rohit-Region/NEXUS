@@ -1,7 +1,7 @@
 //! Telling NEXUS about the portfolio in plain words.
 //!
 //! "bought 5 goldbees in icici direct at 117", "MUP units 156.1421 nav
-//! 9.5085", "paid 8000 tata aia premium". Each line becomes an `Action` the
+//! 9.5085", "paid 8000 tata aia premium", "Value Fund units 470 nav 10.56". Each line becomes an `Action` the
 //! user sees in words and confirms before anything changes.
 //!
 //! # Rules, not a model
@@ -14,21 +14,44 @@
 
 use serde::{Deserialize, Serialize};
 
-/// The ULIP policy the fund codes below belong to.
 pub const TATA_AIA_GROUP: &str = "Tata AIA Smart Pension Secure";
+pub const PNB_METLIFE_GROUP: &str = "PNB MetLife Smart Goal Ensuring Multiplier";
 
-/// Tata AIA pension fund codes, as the policy page names them.
-const ULIP_FUNDS: &[(&str, &str)] = &[
-    ("MUP", "Multicap Opportunities Pension Fund"),
-    ("NAP", "Alpha 50 Index Pension Fund"),
-    ("MVF", "Momentum Value 50 Index Fund"),
-    ("FEP", "Future Equity Pension Fund"),
-    ("IPF", "Income Pension Fund"),
-    ("MQP", "Multicap Momentum Quality Index Pension Fund"),
-    ("TBP", "Life Tax Bonanza Consumption Pension Fund"),
-    ("TAP", "Top 200 Alpha 30 Index Pension Fund"),
-    ("SLP", "Sector Leaders Index Pension Fund"),
+/// Words in a bank payee that mark a premium into one of the policies.
+/// Policybazaar is where the PNB MetLife policy was bought, and its UPI
+/// AutoPay is debited in Policybazaar's name.
+const POLICY_PAYEES: &[(&str, &[&str])] = &[
+    (TATA_AIA_GROUP, &["tata aia", "tataaia"]),
+    (PNB_METLIFE_GROUP, &["metlife", "policybazaar"]),
 ];
+
+/// The policy a premium payment went into, from its payee.
+pub fn policy_of_payee(payee: &str) -> Option<&'static str> {
+    let lower = payee.to_lowercase();
+    POLICY_PAYEES.iter().find(|(_, words)| words.iter().any(|w| lower.contains(w))).map(|(group, _)| *group)
+}
+
+/// ULIP funds as (code, name, policy). Tata AIA's codes are the ones its
+/// policy page shows; PNB MetLife's page shows only names, so those codes
+/// are NEXUS's own and a line may name the fund in full instead.
+const ULIP_FUNDS: &[(&str, &str, &str)] = &[
+    ("MUP", "Multicap Opportunities Pension Fund", TATA_AIA_GROUP),
+    ("NAP", "Alpha 50 Index Pension Fund", TATA_AIA_GROUP),
+    ("MVF", "Momentum Value 50 Index Fund", TATA_AIA_GROUP),
+    ("FEP", "Future Equity Pension Fund", TATA_AIA_GROUP),
+    ("IPF", "Income Pension Fund", TATA_AIA_GROUP),
+    ("MQP", "Multicap Momentum Quality Index Pension Fund", TATA_AIA_GROUP),
+    ("TBP", "Life Tax Bonanza Consumption Pension Fund", TATA_AIA_GROUP),
+    ("TAP", "Top 200 Alpha 30 Index Pension Fund", TATA_AIA_GROUP),
+    ("SLP", "Sector Leaders Index Pension Fund", TATA_AIA_GROUP),
+    ("MQIF", "Momentum Quality Index Fund", PNB_METLIFE_GROUP),
+    ("PVF", "Value Fund", PNB_METLIFE_GROUP),
+];
+
+/// A ULIP fund's name from its code under a policy.
+pub fn ulip_fund_name(code: &str, group: &str) -> Option<&'static str> {
+    ULIP_FUNDS.iter().find(|(c, _, g)| *c == code && *g == group).map(|(_, name, _)| *name)
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -43,7 +66,7 @@ pub enum Action {
     SetInvested { symbol: String, amount: f64 },
     /// A ULIP fund's units and/or NAV, as on the policy page.
     #[serde(rename_all = "camelCase")]
-    UlipFund { code: String, name: String, units: Option<f64>, nav: Option<f64> },
+    UlipFund { code: String, name: String, group: String, units: Option<f64>, nav: Option<f64> },
     /// A premium paid into a ULIP policy.
     #[serde(rename_all = "camelCase")]
     PremiumPaid { group: String, amount: f64 },
@@ -67,7 +90,7 @@ impl Action {
             }
             Action::Sell { symbol, units } => format!("Remove {} unit(s) of {symbol} (sold)", fmt(*units)),
             Action::SetInvested { symbol, amount } => format!("Set what you paid for {symbol} to ₹{}", fmt(*amount)),
-            Action::UlipFund { code, name, units, nav } => {
+            Action::UlipFund { code, name, units, nav, .. } => {
                 let mut parts = Vec::new();
                 if let Some(u) = units {
                     parts.push(format!("{} units", fmt(*u)));
@@ -184,20 +207,30 @@ fn read_one(part: &str) -> Option<Action> {
     let has = |k: &str| ws.iter().any(|w| w == k);
     let lower = part.to_lowercase();
 
-    // A ULIP fund line: a known fund code plus units and/or NAV.
-    if let Some((code, name)) = ULIP_FUNDS.iter().find(|(code, _)| has(&code.to_lowercase())) {
+    // A ULIP fund line: a known fund code or full name, plus units and/or NAV.
+    let fund = ULIP_FUNDS
+        .iter()
+        .find(|(code, name, _)| has(&code.to_lowercase()) || lower.contains(&name.to_lowercase()));
+    if let Some((code, name, group)) = fund {
         let units = after(&ws, &["units", "unit"]);
         let nav = after(&ws, &["nav", "price"]);
         if units.is_some() || nav.is_some() {
-            return Some(Action::UlipFund { code: code.to_string(), name: name.to_string(), units, nav });
+            return Some(Action::UlipFund { code: code.to_string(), name: name.to_string(), group: group.to_string(), units, nav });
         }
         return None;
     }
 
-    // A premium into the Tata AIA policy.
-    if (lower.contains("tata aia") || lower.contains("tataaia")) && (has("premium") || has("paid")) {
+    // A premium into one of the ULIP policies.
+    let policy = if lower.contains("tata aia") || lower.contains("tataaia") {
+        Some(TATA_AIA_GROUP)
+    } else if lower.contains("metlife") {
+        Some(PNB_METLIFE_GROUP)
+    } else {
+        None
+    };
+    if let Some(group) = policy.filter(|_| has("premium") || has("paid")) {
         let amount = ws.iter().find_map(|w| number(w).filter(|n| *n > 0.0))?;
-        return Some(Action::PremiumPaid { group: TATA_AIA_GROUP.to_string(), amount });
+        return Some(Action::PremiumPaid { group: group.to_string(), amount });
     }
 
     if has("remove") || has("delete") {
@@ -263,13 +296,37 @@ mod tests {
     fn ulip_funds_from_the_policy_page() {
         assert_eq!(
             one("MUP units 156.1421 nav 9.5085"),
-            Action::UlipFund { code: "MUP".into(), name: "Multicap Opportunities Pension Fund".into(), units: Some(156.1421), nav: Some(9.5085) }
+            Action::UlipFund { code: "MUP".into(), name: "Multicap Opportunities Pension Fund".into(), group: TATA_AIA_GROUP.into(), units: Some(156.1421), nav: Some(9.5085) }
         );
         assert_eq!(
             one("nap nav 10.6"),
-            Action::UlipFund { code: "NAP".into(), name: "Alpha 50 Index Pension Fund".into(), units: None, nav: Some(10.6) }
+            Action::UlipFund { code: "NAP".into(), name: "Alpha 50 Index Pension Fund".into(), group: TATA_AIA_GROUP.into(), units: None, nav: Some(10.6) }
         );
         assert_eq!(one("paid 8,000 tata aia premium"), Action::PremiumPaid { group: TATA_AIA_GROUP.into(), amount: 8000.0 });
+    }
+
+    #[test]
+    fn premiums_are_tied_to_their_policy_by_payee() {
+        assert_eq!(policy_of_payee("POLICYBAZAAR IN"), Some(PNB_METLIFE_GROUP));
+        assert_eq!(policy_of_payee("TATA AIA LIFE INSURANCE CO"), Some(TATA_AIA_GROUP));
+        assert_eq!(policy_of_payee("TATA MOTORS"), None);
+    }
+
+    #[test]
+    fn pnb_metlife_funds_by_name_or_code() {
+        assert_eq!(
+            one("Value Fund units 470.5 nav 10.56"),
+            Action::UlipFund { code: "PVF".into(), name: "Value Fund".into(), group: PNB_METLIFE_GROUP.into(), units: Some(470.5), nav: Some(10.56) }
+        );
+        assert_eq!(
+            one("mqif nav 10.2"),
+            Action::UlipFund { code: "MQIF".into(), name: "Momentum Quality Index Fund".into(), group: PNB_METLIFE_GROUP.into(), units: None, nav: Some(10.2) }
+        );
+        assert!(
+            matches!(one("Multicap Momentum Quality Index Pension Fund nav 9.9"), Action::UlipFund { code, .. } if code == "MQP"),
+            "Tata's longer name is not PNB's Momentum Quality Index Fund"
+        );
+        assert_eq!(one("paid 5000 pnb metlife premium"), Action::PremiumPaid { group: PNB_METLIFE_GROUP.into(), amount: 5000.0 });
     }
 
     #[test]

@@ -71,6 +71,9 @@ pub struct Row {
     pub from_high: Option<f64>,
     /// Today's volume over the average of the 20 sessions before it.
     pub volume_ratio: Option<f64>,
+    /// Average daily value traded over the last 20 sessions, in ₹ Cr: how
+    /// easily a small investor can buy and later sell.
+    pub turnover_cr: Option<f64>,
     pub spark: Vec<f64>,
     /// Daily closes as `(IST day number, close)`, oldest first: what the pick
     /// journal reads a past suggestion's outcome from. Not sent to the screen.
@@ -107,17 +110,7 @@ pub fn board(refresh: bool, now: i64) -> Result<Board, String> {
         .chain(UNIVERSE.iter().map(|s| format!("{s}.NS")))
         .collect();
 
-    let mut results: Vec<Result<(Row, i64), String>> = Vec::with_capacity(symbols.len());
-    for chunk in symbols.chunks(IN_FLIGHT) {
-        let batch: Vec<_> = std::thread::scope(|scope| {
-            let handles: Vec<_> = chunk.iter().map(|s| scope.spawn(move || fetch_row(s))).collect();
-            handles
-                .into_iter()
-                .map(|h| h.join().unwrap_or_else(|_| Err("Failed".to_string())))
-                .collect()
-        });
-        results.extend(batch);
-    }
+    let results = fetch_rows(&symbols);
 
     let mut indices = Vec::new();
     let mut stocks = Vec::new();
@@ -150,6 +143,23 @@ pub fn board(refresh: bool, now: i64) -> Result<Board, String> {
     Ok(b)
 }
 
+/// Price Yahoo symbols (`RELIANCE.NS`, `^NSEI`), `IN_FLIGHT` at a time,
+/// results in input order with each row's latest market time.
+pub fn fetch_rows(symbols: &[String]) -> Vec<Result<(Row, i64), String>> {
+    let mut results = Vec::with_capacity(symbols.len());
+    for chunk in symbols.chunks(IN_FLIGHT) {
+        let batch: Vec<_> = std::thread::scope(|scope| {
+            let handles: Vec<_> = chunk.iter().map(|s| scope.spawn(move || fetch_row(s))).collect();
+            handles
+                .into_iter()
+                .map(|h| h.join().unwrap_or_else(|_| Err("Failed".to_string())))
+                .collect()
+        });
+        results.extend(batch);
+    }
+    results
+}
+
 /// India Standard Time, which every NSE timestamp is a day in.
 pub const IST_OFFSET: i64 = 19_800;
 
@@ -160,7 +170,7 @@ pub fn day_of(unix: i64, offset: i64) -> i64 {
 }
 
 /// `RELIANCE.NS` -> `RELIANCE`; an index keeps its caret.
-fn display_symbol(yahoo: &str) -> String {
+pub fn display_symbol(yahoo: &str) -> String {
     yahoo.strip_suffix(".NS").unwrap_or(yahoo).to_string()
 }
 
@@ -251,6 +261,14 @@ fn parse_row(body: &str, symbol: &str) -> Result<(Row, i64), String> {
         }
     };
 
+    let turnover_cr = {
+        let n = closes.len().min(volumes.len());
+        let k = n.min(20);
+        (k > 0).then(|| {
+            (n - k..n).map(|i| closes[i] * volumes[i]).sum::<f64>() / k as f64 / 1e7
+        })
+    };
+
     let name = meta
         .get("longName")
         .or_else(|| meta.get("shortName"))
@@ -271,6 +289,7 @@ fn parse_row(body: &str, symbol: &str) -> Result<(Row, i64), String> {
         vs_sma50: sma(50).and_then(|a| pct(price, a)),
         from_high: num("fiftyTwoWeekHigh").and_then(|h| pct(price, h)).map(|p| p.min(0.0)),
         volume_ratio,
+        turnover_cr,
         spark: closes[closes.len().saturating_sub(SPARK)..].to_vec(),
         history,
     };

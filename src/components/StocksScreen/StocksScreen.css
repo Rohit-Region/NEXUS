@@ -621,45 +621,7 @@
   color: var(--color-text-primary);
 }
 
-/* -- Track record --------------------------------------------------------- */
-
-.track {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-secondary);
-  font-size: 12px;
-}
-
-.track__head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px var(--space-sm);
-  width: 100%;
-  padding: var(--space-sm) var(--space-md);
-  background: none;
-  border: none;
-  font: inherit;
-  text-align: left;
-  color: inherit;
-  cursor: pointer;
-}
-
-.track__title {
-  font-weight: 600;
-}
-
-.track__toggle {
-  margin-left: auto;
-  color: var(--color-accent);
-}
-
-.track__body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-sm);
-  padding: 0 var(--space-md) var(--space-md);
-}
+/* -- Track record tables (used by the Report) ----------------------------- */
 
 .track__sub {
   margin: var(--space-sm) 0 0;
@@ -707,4 +669,240 @@
 
 .track-skill li > span:first-child {
   min-width: 90px;
+}
+
+.fund-budget__plan p {
+  margin: 0 0 4px;
+}
+
+.pick__buy {
+  margin: 0;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+/* -- Report --------------------------------------------------------------- */
+
+.report {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.report-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-sm);
+}
+
+.report-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.report-card__label {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+}
+
+.report-card__value {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.report-days__won {
+  background: rgba(52, 211, 153, 0.06);
+}
+
+/* -- Predictions, plan, risk ---------------------------------------------- */
+
+.pick-predict {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+  font-size: 11px;
+}
+
+.pick-predict__head {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 10px;
+  color: var(--color-text-secondary);
+}
+
+.pick-predict strong {
+  font-size: 12px;
+}
+
+.pick-predict__basis {
+  font-size: 10px;
+}
+
+.risk-picker {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.plan-lines {
+  margin: 4px 0 8px;
+  padding-left: 18px;
+  line-height: 1.6;
+}
+
+/* -- News radar ----------------------------------------------------------- */
+
+.radar-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-md);
+}
+
+.radar-head .stocks__rule {
+  flex: 1;
+  margin: 0;
+}
+
+.radar-flows {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--space-md);
+}
+
+.radar-flows ul {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.radar-flow {
+  display: grid;
+  grid-template-columns: 1fr 70px 120px;
+  gap: var(--space-sm);
+  padding: 3px 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.radar-event {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--space-md);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+}
+
+.radar-event__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-sm);
+}
+
+.radar-event__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.radar-event__text {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.radar-event__meta {
+  margin: 0;
+}
+
+.radar-stocks {
+  display: flex;
+  flex-direction: column;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--color-border);
+}
+
+.radar-stock {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.radar-stock:last-child {
+  border-bottom: none;
+}
+
+.radar-stock__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-sm);
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+
+.radar-stock__name {
+  flex: 1;
+  min-width: 120px;
+}
+
+.radar-stock__why,
+.radar-stock__plan {
+  margin: 4px 0 0 18px;
+  line-height: 1.45;
+}
+
+.radar-stock__plan {
+  color: var(--color-text-primary);
+  font-weight: 500;
+}
+
+/* -- IPOs ------------------------------------------------------------------ */
+
+.ipo__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px var(--space-md);
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.ipo-allot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  font-size: 12px;
+}
+
+.ipo-allot__form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.ipo-allot__symbol {
+  display: inline-block;
+  margin-left: var(--space-sm);
 }

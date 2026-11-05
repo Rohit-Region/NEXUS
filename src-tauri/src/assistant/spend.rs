@@ -73,12 +73,14 @@ pub const CATEGORIES: &[&str] = &[
     "Sports",
     "Health",
     "Entertainment",
+    "Party",
     "Rent",
     "Insurance",
     "Education",
     "Family",
     "People",
     "Investments",
+    "Mutual Fund",
     "Other",
     "Uncategorised",
 ];
@@ -116,6 +118,7 @@ pub enum Outcome {
 /// Phrases that mark a bank message as something other than a completed
 /// payment: a future debit, a request, a due date, a statement.
 const NOT_A_PAYMENT: &[(&str, &str)] = &[
+    ("unblocked", "Blocked money released, not a payment"),
     ("will be debited", "A future debit, not a payment yet"),
     ("has requested", "A payment request, not a payment"),
     ("requested money", "A payment request, not a payment"),
@@ -140,8 +143,14 @@ pub fn read_sms(sender: &str, text: &str, received_on: &str) -> Outcome {
     let chars: Vec<char> = text.chars().collect();
     let lower: String = text.to_lowercase();
 
+    // A mandate is only a setup until money moves on it: an AutoPay that was
+    // "successfully debited", or a one-time mandate (an IPO allotment)
+    // "redeemed". Those are payments and must not be set aside with the
+    // setup messages.
+    let mandate_paid = lower.contains("mandate")
+        && (lower.contains("successfully debited") || has_word(&lower, "redeemed"));
     for (phrase, reason) in NOT_A_PAYMENT {
-        if lower.contains(phrase) {
+        if lower.contains(phrase) && !(mandate_paid && phrase.contains("mandate")) {
             return Outcome::Ignored { reason: (*reason).to_string() };
         }
     }
@@ -152,7 +161,7 @@ pub fn read_sms(sender: &str, text: &str, received_on: &str) -> Outcome {
     };
 
     let card = has_word(&lower, "card");
-    let debit = direction(&lower, card);
+    let debit = if mandate_paid { Some(true) } else { direction(&lower, card) };
     let date_match = find_date(&chars).or_else(|| find_short_date(&chars, received_on));
     let bank = bank_of(sender);
     let digits = account_digits(&lower);
@@ -178,6 +187,14 @@ pub fn read_sms(sender: &str, text: &str, received_on: &str) -> Outcome {
     };
 
     let complete = reading.debit.is_some() && reading.date.is_some() && reading.payee.is_some();
+    // A redeemed one-time mandate is usually an IPO allotment, which is an
+    // investment, but the message cannot say so: the user decides.
+    if complete && mandate_paid && has_word(&lower, "redeemed") {
+        return Outcome::Review {
+            reading,
+            reason: "A one-time mandate was paid. If it was an IPO allotment, mark it as an investment".to_string(),
+        };
+    }
     if complete && known_shape(sender, &lower) {
         Outcome::Booked(reading)
     } else {
@@ -223,7 +240,10 @@ fn known_shape(sender: &str, lower: &str) -> bool {
     // a transfer from the user's own account is marked Moved once and
     // remembered.
     let icici_credit = icici && has_word(lower, "credited") && !lower.contains("debited");
-    icici_upi || icici_debit_with_balance || hdfc_card_txn || icici_credit
+    // "Rs 5000.00 successfully debited from ICICI Bank XX225 on 30-Oct-26
+    // towards PAYEE via UPI AutoPay mandate . RRN: ..."
+    let icici_autopay = icici && lower.contains("successfully debited from") && lower.contains(" towards ");
+    icici_upi || icici_debit_with_balance || hdfc_card_txn || icici_credit || icici_autopay
 }
 
 fn bank_of(sender: &str) -> &'static str {
@@ -307,10 +327,10 @@ fn account_digits(lower: &str) -> Option<String> {
                 return Some(d);
             }
         }
-        // "*1234"
+        // "*1234", but not a UPI ID such as "*5111@ybl", which is the payee.
         if chars[i] == '*' {
             let d = digits_at(i + 1);
-            if d.len() >= 3 {
+            if d.len() >= 3 && chars.get(i + 1 + d.len()) != Some(&'@') {
                 return Some(d);
             }
         }
@@ -423,9 +443,14 @@ pub fn account_of(sender: &str, text: &str) -> String {
 /// A balance carried forward: the last known one, plus money in and less
 /// money out on that account since. Spending and transfers (a card bill paid
 /// from the account) leave it; income and refunds arrive in it.
-pub fn carried_balance(known: i64, since: &[(Kind, i64)]) -> i64 {
+///
+/// A credit card's balance is what is owed, held as a negative number. Its
+/// purchases push it further below zero, and a transfer onto it is the bill
+/// being paid, so on a card a transfer arrives rather than leaves.
+pub fn carried_balance(known: i64, since: &[(Kind, i64)], credit_card: bool) -> i64 {
     since.iter().fold(known, |b, (kind, paise)| match kind {
         Kind::Income | Kind::Refund => b + paise,
+        Kind::Transfer if credit_card => b + paise,
         Kind::Spend | Kind::Transfer => b - paise,
     })
 }
@@ -586,6 +611,16 @@ fn find_payee(chars: &[char], lower: &str, date_end: Option<usize>) -> Option<St
             }
         }
     }
+    // An AutoPay debit: "...debited from ICICI Bank XX225 on 30-Oct-26
+    // towards PAYEE via UPI...". Checked before " from ", which here names
+    // the user's own account.
+    if let Some(i) = lower.find(" towards ") {
+        let start = i + " towards ".len();
+        let stop = lower[start..].find(" via ").unwrap_or(lower.len() - start);
+        if let Some(p) = clean_payee(&text[start..start + stop]) {
+            return Some(p);
+        }
+    }
     for cue in [" at ", "\nat ", " to ", "\nto ", " from ", "\nfrom ", " by ", " info:", " info "] {
         if let Some(i) = lower.find(cue) {
             let start = i + cue.len();
@@ -671,12 +706,14 @@ pub fn guess_category(payee: &str) -> &'static str {
         ("Tour", &["tour", "trek", "thrillophilia", "tripoto"]),
         ("Sports", &["decathlon", "playo", "hudle", "cultfit", "cult.fit", "gym", "turf", "badminton", "cricket", "football", "sports"]),
         ("Health", &["apollo", "pharmeasy", "netmeds", "hospital", "clinic", "pharmacy", "medplus", "practo", "1mg"]),
+        ("Party", &["liquor", "wines", "brewery", "brewing", "pub", "lounge", "taproom"]),
         ("Entertainment", &["netflix", "spotify", "hotstar", "bookmyshow", "primevideo", "sonyliv", "youtube", "pvr", "inox"]),
         ("Rent", &["rent", "nobroker"]),
         ("Education", &["udemy", "coursera", "school", "college", "tuition"]),
-        // Tata AIA here is the user's pension ULIP: a premium into it is
-        // money saved, not spent.
-        ("Investments", &["tata aia", "tataaia", "zerodha", "groww", "kuvera", "upstox", "angel one", "mutual fund", "icicisec", "nps", "ppf", "sip"]),
+        ("Mutual Fund", &["mutual fund", "mutualfund", "sip", "amc", "bse star", "bsestarmf", "cams", "kfintech", "parag parikh", "ppfas"]),
+        // Tata AIA and PNB MetLife here are the user's ULIPs: a premium into
+        // them is money saved, not spent.
+        ("Investments", &["tata aia", "tataaia", "metlife", "zerodha", "groww", "kuvera", "upstox", "angel one", "icicisec", "nps", "ppf"]),
         ("Insurance", &["insurance", "policybazaar", "lic"]),
     ];
     let lower = payee.to_lowercase();
@@ -691,9 +728,9 @@ pub fn guess_category(payee: &str) -> &'static str {
     UNCATEGORISED
 }
 
-/// Investments are money kept, not money spent.
+/// Investments and mutual funds are money kept, not money spent.
 pub fn kind_for_category(category: &str, kind: Kind) -> Kind {
-    if kind == Kind::Spend && category == "Investments" {
+    if kind == Kind::Spend && (category == "Investments" || category == "Mutual Fund") {
         Kind::Transfer
     } else {
         kind
@@ -768,6 +805,41 @@ pub struct Expense {
     pub account: String,
     pub channel: String,
     pub note: String,
+    /// The user's own part of a split payment; `None` when not split.
+    pub my_share_paise: Option<i64>,
+    /// What the other people in a split owe back.
+    pub shares: Vec<Share>,
+}
+
+impl Expense {
+    /// What counts toward the user's spending: their share of a split
+    /// payment, else all of it.
+    pub fn counted_paise(&self) -> i64 {
+        self.my_share_paise.unwrap_or(self.amount_paise)
+    }
+}
+
+/// One other person's part of a split payment.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Share {
+    pub id: i64,
+    pub person: String,
+    pub amount_paise: i64,
+}
+
+/// The user's part once `others` are taken out of `amount`, or why the split
+/// does not add up. Everyone else must owe something, and together no more
+/// than the whole.
+pub fn my_share(amount_paise: i64, others: &[i64]) -> Result<i64, String> {
+    if others.iter().any(|p| *p <= 0) {
+        return Err("Every person in the split needs an amount above zero.".to_string());
+    }
+    let theirs: i64 = others.iter().sum();
+    if theirs > amount_paise {
+        return Err("The other people's parts add up to more than the payment.".to_string());
+    }
+    Ok(amount_paise - theirs)
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -847,6 +919,11 @@ pub struct Balance {
     pub source: String,
     /// Payments on the account since then, already applied.
     pub adjusted: u32,
+    /// A credit card: `balance_paise` is what is owed, as a negative number.
+    pub credit_card: bool,
+    /// False for a credit card whose dues were never set: the balance is
+    /// then only this month's purchases on it, not the full amount owed.
+    pub known: bool,
 }
 
 /// What was kept in a month: money in (income plus refunds) less spending.
@@ -931,23 +1008,24 @@ pub fn summarize(
             Kind::Refund => refund += e.amount_paise,
             Kind::Transfer => transfer += e.amount_paise,
             Kind::Spend => {
-                spend += e.amount_paise;
+                let mine = e.counted_paise();
+                spend += mine;
                 let day: u32 = e.occurred_on.get(8..10).and_then(|d| d.parse().ok()).unwrap_or(0);
                 if (1..=dim).contains(&day) {
                     let slot = &mut days[(day - 1) as usize];
-                    slot.spend_paise += e.amount_paise;
+                    slot.spend_paise += mine;
                     slot.count += 1;
-                    weekdays[weekday(y, m, day) as usize] += e.amount_paise;
+                    weekdays[weekday(y, m, day) as usize] += mine;
                 }
                 let c = categories.entry(e.category.clone()).or_default();
-                c.0 += e.amount_paise;
+                c.0 += mine;
                 c.1 += 1;
                 let p = payees
                     .entry(payee_key(&e.payee))
                     .or_insert_with(|| (e.payee.clone(), e.category.clone(), 0, 0));
-                p.2 += e.amount_paise;
+                p.2 += mine;
                 p.3 += 1;
-                *accounts.entry(e.account.clone()).or_default() += e.amount_paise;
+                *accounts.entry(e.account.clone()).or_default() += mine;
             }
         }
     }
@@ -1071,6 +1149,14 @@ mod tests {
     }
 
     #[test]
+    fn a_payee_upi_id_with_digits_is_not_the_card_number() {
+        let text = "Txn Rs.29.00\nOn HDFC Bank Card 5131\nAt *5111@ybl \nby UPI 132225847487\nOn 02-11\nNot You?\nCall 18002586161/SMS BLOCK CC 5131 to 7308080808";
+        let r = booked(read_sms("JM-HDFCBK-S", text, "2026-11-02"));
+        assert_eq!(r.account, "HDFC card XX5131");
+        assert_eq!(r.payee.as_deref(), Some("*5111@ybl"));
+    }
+
+    #[test]
     fn a_date_without_a_year_never_lands_in_the_future() {
         let short = |s: &str, on: &str| find_short_date(&s.chars().collect::<Vec<_>>(), on).map(|d| d.iso);
         assert_eq!(short("On 31-12\nNot You?", "2027-01-01"), Some("2026-12-31".into()));
@@ -1092,8 +1178,15 @@ mod tests {
     #[test]
     fn a_balance_is_carried_forward_through_later_payments() {
         let since = [(Kind::Spend, 92_500), (Kind::Income, 10_000_000), (Kind::Transfer, 2_000_000), (Kind::Refund, 1_000)];
-        assert_eq!(carried_balance(2_400_000, &since), 2_400_000 - 92_500 + 10_000_000 - 2_000_000 + 1_000);
-        assert_eq!(carried_balance(2_400_000, &[]), 2_400_000);
+        assert_eq!(carried_balance(2_400_000, &since, false), 2_400_000 - 92_500 + 10_000_000 - 2_000_000 + 1_000);
+        assert_eq!(carried_balance(2_400_000, &[], false), 2_400_000);
+    }
+
+    #[test]
+    fn a_credit_card_owes_more_with_purchases_and_less_once_paid() {
+        // ₹5,000 owed, then ₹925 spent and a ₹3,000 bill payment received.
+        let since = [(Kind::Spend, 92_500), (Kind::Transfer, 300_000)];
+        assert_eq!(carried_balance(-500_000, &since, true), -500_000 - 92_500 + 300_000);
     }
 
     #[test]
@@ -1160,6 +1253,44 @@ mod tests {
     }
 
     #[test]
+    fn a_paid_autopay_mandate_is_booked_as_a_debit() {
+        let text = "Rs 5000.00 successfully debited from ICICI Bank XX225 on 30-Oct-26 towards POLICYBAZAAR IN via UPI AutoPay mandate . RRN: 104346474442";
+        match read_sms("AX-ICICIT-S", text, "2026-10-30") {
+            Outcome::Booked(r) => {
+                assert_eq!(r.amount_paise, Some(500_000));
+                assert_eq!(r.debit, Some(true));
+                assert_eq!(r.payee.as_deref(), Some("POLICYBAZAAR IN"));
+                assert_eq!(r.account, "ICICI XX225");
+            }
+            other => panic!("expected booked, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_redeemed_ipo_mandate_waits_for_the_user_as_a_debit() {
+        let text = "Dear Customer, the mandate of INR 13428.00 raised by JIO PLATFORMS L on 27-Oct-26 and is successfully redeemed through RRN 630002460255 -ICICI Bank.";
+        match read_sms("AX-ICICIT-S", text, "2026-10-27") {
+            Outcome::Review { reading, reason } => {
+                assert_eq!(reading.amount_paise, Some(1_342_800));
+                assert_eq!(reading.debit, Some(true));
+                assert_eq!(reading.payee.as_deref(), Some("JIO PLATFORMS L"));
+                assert!(reason.contains("IPO"), "{reason}");
+            }
+            other => panic!("expected review, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mandate_setups_and_releases_are_still_set_aside() {
+        for text in [
+            "Your AutoPay mandate with ASPRESENTED is successfully created towards POLICYBAZAAR IN from 30-Oct-26 to 30-Oct-36 for Rs 5002.00, RRN 104346471186-ICICI Bank.",
+            "Dear Customer, your account has been unblocked by an amount of INR 13428.00, against the UPI one-time mandate-ICICI Bank.",
+        ] {
+            assert!(matches!(read_sms("AX-ICICIT-S", text, "2026-10-30"), Outcome::Ignored { .. }), "{text}");
+        }
+    }
+
+    #[test]
     fn dates_in_every_bank_style() {
         let iso = |s: &str| find_date(&s.chars().collect::<Vec<_>>()).map(|d| d.iso);
         assert_eq!(iso("on 24-Oct-26;"), Some("2026-10-24".into()));
@@ -1202,6 +1333,10 @@ mod tests {
         assert!(valid_category("Tour") && valid_category("Sports"));
         assert_eq!(guess_category("TATA AIA LIFE INSURANCE CO"), "Investments", "checked before Insurance");
         assert_eq!(guess_category("HDFC ERGO INSURANCE"), "Insurance");
+        assert_eq!(guess_category("PNB METLIFE INDIA INSURANCE"), "Investments", "checked before Insurance");
+        assert_eq!(guess_category("BSE STAR MF SIP"), "Mutual Fund");
+        assert_eq!(guess_category("PPFAS Mutual Fund"), "Mutual Fund");
+        assert_eq!(kind_for_category("Mutual Fund", Kind::Spend), Kind::Transfer);
     }
 
     #[test]
@@ -1232,7 +1367,29 @@ mod tests {
             account: "ICICI XX225".into(),
             channel: "UPI".into(),
             note: String::new(),
+            my_share_paise: None,
+            shares: Vec::new(),
         }
+    }
+
+    #[test]
+    fn a_split_payment_counts_only_my_share() {
+        let mut party = expense(1, "2026-10-30", 377_000, Kind::Spend, "SS LIQUOR 01", "Party");
+        party.my_share_paise = Some(94_250);
+        let view = summarize((2026, 10), "2026-10-31", vec![party], &HashMap::new(), 0, None, Vec::new());
+        assert_eq!(view.spend_paise, 94_250);
+        assert_eq!(view.categories[0].spend_paise, 94_250);
+        assert_eq!(view.days[29].spend_paise, 94_250);
+    }
+
+    #[test]
+    fn a_split_must_add_up() {
+        assert_eq!(my_share(377_000, &[94_250, 94_250, 94_250]), Ok(94_250));
+        assert_eq!(my_share(100_000, &[100_000]), Ok(0), "paying entirely for someone else");
+        assert!(my_share(100_000, &[60_000, 50_000]).is_err());
+        assert!(my_share(100_000, &[0]).is_err());
+        // ₹100 among three, as the screen splits it: the odd paisa is the user's.
+        assert_eq!(my_share(10_000, &[3_333, 3_333]), Ok(3_334));
     }
 
     #[test]
