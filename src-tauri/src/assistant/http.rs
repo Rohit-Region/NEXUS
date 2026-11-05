@@ -15,24 +15,17 @@
 //! Only `https://` is accepted. A connector that could be pointed at `http://`
 //! or `file://` would be a credential-leaking primitive wearing a connector's
 //! clothes.
+//!
+//! Android has no `curl`, so the Android build alone sends through `ureq`
+//! instead (see `via_ureq`), with the same rules and the same results.
 
 use std::time::Duration;
 
-use super::shell::{run_with_stdin, RunError};
-
-const CURL: &str = "/usr/bin/curl";
 /// The deadline for an ordinary request to a web service.
 const DEFAULT_MAX_TIME: Duration = Duration::from_secs(20);
-/// How much longer the process is allowed than curl's own deadline, so curl
-/// reports a timeout in words rather than being killed mid-request.
-const PROCESS_GRACE: Duration = Duration::from_secs(5);
 /// Longest body NEXUS will read. A connector answers questions; it does not
 /// mirror a service.
 const MAX_BODY: usize = 512 * 1024;
-/// Separates the body from the status line curl appends.
-const STATUS_MARKER: &str = "\u{1e}NEXUS-STATUS:";
-/// Separates the status code from the redirect target in that line.
-const REDIRECT_MARKER: char = '\u{1f}';
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Response {
@@ -114,21 +107,6 @@ pub fn safe_https(url: &str) -> Result<String, HttpError> {
     Ok(trimmed.to_string())
 }
 
-/// Escape a value for curl's config-file syntax.
-///
-/// Values are double-quoted there, so a quote or backslash in a token or a
-/// header would end the value early. Newlines are refused outright rather
-/// than escaped: a newline could start a new directive, which is the config
-/// equivalent of an injection.
-fn config_value(raw: &str) -> Result<String, HttpError> {
-    if raw.contains('\n') || raw.contains('\r') {
-        return Err(HttpError::Rejected {
-            detail: "A header or credential cannot contain a line break.".to_string(),
-        });
-    }
-    Ok(raw.replace('\\', "\\\\").replace('"', "\\\""))
-}
-
 #[derive(Debug, Clone)]
 pub struct Request {
     pub method: &'static str,
@@ -207,105 +185,286 @@ pub fn send_with_timeout(request: Request, max_time: Duration) -> Result<Respons
         });
     }
 
-    let mut config = String::new();
-    config.push_str(&format!("url = \"{}\"\n", config_value(&url)?));
-    config.push_str(&format!("request = \"{}\"\n", request.method));
-    for (name, value) in &request.headers {
-        config.push_str(&format!(
-            "header = \"{}: {}\"\n",
-            config_value(name)?,
-            config_value(value)?
-        ));
-    }
-    if let Some((user, secret)) = &request.basic_auth {
-        config.push_str(&format!(
-            "user = \"{}:{}\"\n",
-            config_value(user)?,
-            config_value(secret)?
-        ));
-    }
-    if let Some(body) = &request.body {
-        config.push_str(&format!("data = \"{}\"\n", config_value(body)?));
-    }
-    // Boolean options in a curl config file are bare words. Writing
-    // `location = false` is a parse error, not a disabled redirect, and it
-    // made every request fail before a packet left the machine. Not following
-    // redirects is curl's default, so its absence is the desired behaviour:
-    // an authenticated request must never be replayed to somewhere else.
-    config.push_str("silent\nshow-error\nfail-with-body\n");
-    config.push_str(&format!("max-time = {}\n", max_time.as_secs().max(1)));
-    config.push_str(&format!(
-        "write-out = \"{STATUS_MARKER}%{{http_code}}{REDIRECT_MARKER}%{{redirect_url}}\"\n"
-    ));
+    let response = transport::send(&request, &url, max_time)?;
+    Ok(Response {
+        body: capped(response.body),
+        ..response
+    })
+}
 
-    // argv carries no data at all: the entire request is on stdin.
-    let out = run_with_stdin(CURL, &["--config", "-"], &config, max_time + PROCESS_GRACE).map_err(
-        |e| match e {
-            RunError::NotFound { .. } => HttpError::Unreachable {
-                detail: "curl is missing from this Mac, so NEXUS cannot make web requests."
-                    .to_string(),
-            },
-            other => HttpError::Unreachable {
-                detail: other.to_string(),
-            },
-        },
-    )?;
-
-    let raw = out.stdout;
-    let (body, status_text) = match raw.rsplit_once(STATUS_MARKER) {
-        Some((body, status)) => (body, status),
-        None => {
-            let detail = if out.stderr.is_empty() {
-                "The request did not complete.".to_string()
-            } else {
-                out.stderr
-            };
-            return Err(HttpError::Unreachable { detail });
+/// Cut a body to [`MAX_BODY`] on a character boundary, where
+/// `String::truncate` alone would panic mid-character.
+fn capped(mut body: String) -> String {
+    if body.len() > MAX_BODY {
+        let mut end = MAX_BODY;
+        while !body.is_char_boundary(end) {
+            end -= 1;
         }
-    };
+        body.truncate(end);
+    }
+    body
+}
 
-    let (status_text, redirect) = match status_text.split_once(REDIRECT_MARKER) {
-        Some((code, target)) => (code, Some(target.trim()).filter(|t| !t.is_empty())),
-        None => (status_text, None),
-    };
-    let redirect = redirect.map(str::to_string);
+#[cfg(not(target_os = "android"))]
+use via_curl as transport;
+#[cfg(target_os = "android")]
+use via_ureq as transport;
 
-    let status: u16 = status_text
-        .trim()
-        .parse()
-        .map_err(|_| HttpError::Malformed {
-            detail: "The response had no usable status code.".to_string(),
+/// The Mac's transport: the system `curl`, with the request on stdin.
+#[cfg(not(target_os = "android"))]
+mod via_curl {
+    use super::*;
+    use crate::assistant::shell::{run_with_stdin, RunError};
+
+    const CURL: &str = "/usr/bin/curl";
+    /// How much longer the process is allowed than curl's own deadline, so curl
+    /// reports a timeout in words rather than being killed mid-request.
+    const PROCESS_GRACE: Duration = Duration::from_secs(5);
+    /// Separates the body from the status line curl appends.
+    const STATUS_MARKER: &str = "\u{1e}NEXUS-STATUS:";
+    /// Separates the status code from the redirect target in that line.
+    const REDIRECT_MARKER: char = '\u{1f}';
+
+    /// Escape a value for curl's config-file syntax.
+    ///
+    /// Values are double-quoted there, so a quote or backslash in a token or a
+    /// header would end the value early. Newlines are refused outright rather
+    /// than escaped: a newline could start a new directive, which is the config
+    /// equivalent of an injection.
+    pub(super) fn config_value(raw: &str) -> Result<String, HttpError> {
+        if raw.contains('\n') || raw.contains('\r') {
+            return Err(HttpError::Rejected {
+                detail: "A header or credential cannot contain a line break.".to_string(),
+            });
+        }
+        Ok(raw.replace('\\', "\\\\").replace('"', "\\\""))
+    }
+
+    pub fn send(request: &Request, url: &str, max_time: Duration) -> Result<Response, HttpError> {
+        let mut config = String::new();
+        config.push_str(&format!("url = \"{}\"\n", config_value(url)?));
+        config.push_str(&format!("request = \"{}\"\n", request.method));
+        for (name, value) in &request.headers {
+            config.push_str(&format!(
+                "header = \"{}: {}\"\n",
+                config_value(name)?,
+                config_value(value)?
+            ));
+        }
+        if let Some((user, secret)) = &request.basic_auth {
+            config.push_str(&format!(
+                "user = \"{}:{}\"\n",
+                config_value(user)?,
+                config_value(secret)?
+            ));
+        }
+        if let Some(body) = &request.body {
+            config.push_str(&format!("data = \"{}\"\n", config_value(body)?));
+        }
+        // Boolean options in a curl config file are bare words. Writing
+        // `location = false` is a parse error, not a disabled redirect, and it
+        // made every request fail before a packet left the machine. Not following
+        // redirects is curl's default, so its absence is the desired behaviour:
+        // an authenticated request must never be replayed to somewhere else.
+        config.push_str("silent\nshow-error\nfail-with-body\n");
+        config.push_str(&format!("max-time = {}\n", max_time.as_secs().max(1)));
+        config.push_str(&format!(
+            "write-out = \"{STATUS_MARKER}%{{http_code}}{REDIRECT_MARKER}%{{redirect_url}}\"\n"
+        ));
+
+        // argv carries no data at all: the entire request is on stdin.
+        let out = run_with_stdin(CURL, &["--config", "-"], &config, max_time + PROCESS_GRACE)
+            .map_err(|e| match e {
+                RunError::NotFound { .. } => HttpError::Unreachable {
+                    detail: "curl is missing from this Mac, so NEXUS cannot make web requests."
+                        .to_string(),
+                },
+                other => HttpError::Unreachable {
+                    detail: other.to_string(),
+                },
+            })?;
+
+        let raw = out.stdout;
+        let (body, status_text) = match raw.rsplit_once(STATUS_MARKER) {
+            Some((body, status)) => (body, status),
+            None => {
+                let detail = if out.stderr.is_empty() {
+                    "The request did not complete.".to_string()
+                } else {
+                    out.stderr
+                };
+                return Err(HttpError::Unreachable { detail });
+            }
+        };
+
+        let (status_text, redirect) = match status_text.split_once(REDIRECT_MARKER) {
+            Some((code, target)) => (code, Some(target.trim()).filter(|t| !t.is_empty())),
+            None => (status_text, None),
+        };
+        let redirect = redirect.map(str::to_string);
+
+        let status: u16 = status_text
+            .trim()
+            .parse()
+            .map_err(|_| HttpError::Malformed {
+                detail: "The response had no usable status code.".to_string(),
+            })?;
+
+        // curl still writes the status marker when the request never happened,
+        // with a code of zero: a DNS failure, a refused connection, a timeout. On
+        // its own that came back as `Ok` with status 0, so a request that never
+        // left the machine looked like a response. The reason is on stderr, where
+        // curl puts it as "curl: (6) Could not resolve host: ...".
+        if status == 0 {
+            // Strip curl's "curl: (6) " prefix so the user reads the reason
+            // rather than an exit code they would have to look up.
+            let detail = out
+                .stderr
+                .split_once(") ")
+                .map(|(_, rest)| rest.trim().to_string())
+                .filter(|rest| !rest.is_empty())
+                .unwrap_or_else(|| out.stderr.trim().to_string());
+            return Err(HttpError::Unreachable {
+                detail: if detail.is_empty() {
+                    "The request did not reach the server.".to_string()
+                } else {
+                    detail
+                },
+            });
+        }
+
+        Ok(Response {
+            status,
+            body: body.to_string(),
+            redirect,
+        })
+    }
+}
+
+/// Android's transport, where there is no `curl`: `ureq` over `rustls`,
+/// trusting the Mozilla root certificates built into the app.
+///
+/// It keeps curl's behaviour exactly, so no caller can tell them apart: an
+/// error status is a response to read, not a failure; a redirect is reported
+/// with its absolute target and never followed; and a body with no stated
+/// type goes as a form, as curl's `data` sends it.
+///
+/// Also built for tests on the Mac, so both transports are checked there.
+#[cfg(any(target_os = "android", test))]
+mod via_ureq {
+    use super::*;
+    use std::io::Read;
+
+    pub fn send(request: &Request, url: &str, max_time: Duration) -> Result<Response, HttpError> {
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_global(Some(max_time))
+            // With no redirects allowed, ureq hands the 3xx back as it is.
+            .max_redirects(0)
+            .http_status_as_error(false)
+            .build()
+            .into();
+
+        let mut builder = ureq::http::Request::builder()
+            .method(request.method)
+            .uri(url);
+        for (name, value) in &request.headers {
+            builder = builder.header(name, value);
+        }
+        if let Some((user, secret)) = &request.basic_auth {
+            builder = builder.header(
+                "Authorization",
+                format!("Basic {}", base64(&format!("{user}:{secret}"))),
+            );
+        }
+        let typed = request
+            .headers
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("content-type"));
+        if request.body.is_some() && !typed {
+            builder = builder.header("Content-Type", "application/x-www-form-urlencoded");
+        }
+
+        // A header value with a line break fails here, as curl's config refuses one.
+        let invalid = |e: ureq::http::Error| HttpError::Rejected {
+            detail: format!("That request could not be built: {e}"),
+        };
+        let sent = match &request.body {
+            Some(body) => agent.run(builder.body(body.as_str()).map_err(invalid)?),
+            None => agent.run(builder.body(()).map_err(invalid)?),
+        };
+        let mut response = sent.map_err(|e| HttpError::Unreachable {
+            detail: e.to_string(),
         })?;
 
-    // curl still writes the status marker when the request never happened,
-    // with a code of zero: a DNS failure, a refused connection, a timeout. On
-    // its own that came back as `Ok` with status 0, so a request that never
-    // left the machine looked like a response. The reason is on stderr, where
-    // curl puts it as "curl: (6) Could not resolve host: ...".
-    if status == 0 {
-        // Strip curl's "curl: (6) " prefix so the user reads the reason
-        // rather than an exit code they would have to look up.
-        let detail = out
-            .stderr
-            .split_once(") ")
-            .map(|(_, rest)| rest.trim().to_string())
-            .filter(|rest| !rest.is_empty())
-            .unwrap_or_else(|| out.stderr.trim().to_string());
-        return Err(HttpError::Unreachable {
-            detail: if detail.is_empty() {
-                "The request did not reach the server.".to_string()
-            } else {
-                detail
-            },
-        });
+        let status = response.status().as_u16();
+        let redirect = (300..400)
+            .contains(&status)
+            .then(|| {
+                response
+                    .headers()
+                    .get("location")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|target| absolute(url, target.trim()))
+            })
+            .flatten();
+
+        let mut bytes = Vec::new();
+        response
+            .body_mut()
+            .as_reader()
+            .take(MAX_BODY as u64 + 4)
+            .read_to_end(&mut bytes)
+            .map_err(|e| HttpError::Unreachable {
+                detail: format!("The response was cut off: {e}"),
+            })?;
+
+        Ok(Response {
+            status,
+            body: String::from_utf8_lossy(&bytes).into_owned(),
+            redirect,
+        })
     }
 
-    let mut body = body.to_string();
-    if body.len() > MAX_BODY {
-        body.truncate(MAX_BODY);
+    /// A `Location` resolved against the request's URL, as curl reports it.
+    pub(super) fn absolute(base: &str, target: &str) -> String {
+        let scheme_end = base.find("://").map_or(0, |i| i + 3);
+        let origin_end = base[scheme_end..]
+            .find('/')
+            .map_or(base.len(), |i| scheme_end + i);
+        if target.contains("://") {
+            target.to_string()
+        } else if let Some(rest) = target.strip_prefix("//") {
+            format!("{}{rest}", &base[..scheme_end])
+        } else if target.starts_with('/') {
+            format!("{}{target}", &base[..origin_end])
+        } else {
+            let path = &base[..base.find(['?', '#']).unwrap_or(base.len())];
+            let dir_end = path[origin_end..]
+                .rfind('/')
+                .map_or(path.len(), |i| origin_end + i);
+            format!("{}/{target}", &path[..dir_end])
+        }
     }
 
-    Ok(Response { status, body, redirect })
+    pub(super) fn base64(raw: &str) -> String {
+        const ALPHABET: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = String::new();
+        for chunk in raw.as_bytes().chunks(3) {
+            let n = chunk
+                .iter()
+                .enumerate()
+                .fold(0u32, |n, (i, b)| n | (*b as u32) << (16 - 8 * i));
+            for i in 0..4 {
+                out.push(if i <= chunk.len() {
+                    ALPHABET[(n >> (18 - 6 * i)) as usize & 63] as char
+                } else {
+                    '='
+                });
+            }
+        }
+        out
+    }
 }
 
 /// Read a secret from the macOS Keychain.
@@ -450,7 +609,168 @@ mod tests {
             "the secret must not be an argument"
         );
     }
+    use super::via_curl::config_value;
     use super::*;
+
+    // -- The two transports agree ---------------------------------------------
+
+    /// A one-off HTTP server on loopback that answers `count` requests: 404 on
+    /// `/missing`, a relative redirect on `/moved`, and anything else echoes
+    /// the request it received, so the test can read the headers sent.
+    fn local_server(count: usize) -> String {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let base = format!("http://{}", listener.local_addr().expect("addr"));
+        std::thread::spawn(move || {
+            for stream in listener.incoming().take(count) {
+                let mut stream = stream.expect("connection");
+                let mut reader = BufReader::new(stream.try_clone().expect("clone"));
+                let mut head = String::new();
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                        break;
+                    }
+                    head.push_str(&line);
+                }
+                let length = head
+                    .lines()
+                    .find_map(|l| {
+                        l.to_lowercase()
+                            .strip_prefix("content-length:")
+                            .map(|n| n.trim().parse().unwrap_or(0))
+                    })
+                    .unwrap_or(0);
+                let mut body = vec![0; length];
+                std::io::Read::read_exact(&mut reader, &mut body).expect("body");
+                head.push_str(&String::from_utf8_lossy(&body));
+                let path = head.split_whitespace().nth(1).unwrap_or("/").to_string();
+                let reply = match path.as_str() {
+                    "/missing" => "HTTP/1.1 404 Not Found\r\nContent-Length: 4\r\nConnection: close\r\n\r\nnope".to_string(),
+                    "/moved" => "HTTP/1.1 302 Found\r\nLocation: /elsewhere\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string(),
+                    _ => format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{head}", head.len()),
+                };
+                let _ = stream.write_all(reply.as_bytes());
+            }
+        });
+        base
+    }
+
+    type Transport = fn(&Request, &str, Duration) -> Result<Response, HttpError>;
+    const TRANSPORTS: [(&str, Transport); 2] = [
+        ("curl", super::via_curl::send),
+        ("ureq", super::via_ureq::send),
+    ];
+
+    #[test]
+    fn both_transports_return_an_error_status_as_a_response() {
+        for (name, send) in TRANSPORTS {
+            let base = local_server(1);
+            let url = format!("{base}/missing");
+            let response = send(&Request::get(&url), &url, Duration::from_secs(5)).expect(name);
+            assert_eq!(
+                (response.status, response.body.as_str()),
+                (404, "nope"),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn both_transports_report_a_redirect_as_an_absolute_address_without_following_it() {
+        for (name, send) in TRANSPORTS {
+            let base = local_server(1);
+            let url = format!("{base}/moved");
+            let response = send(&Request::get(&url), &url, Duration::from_secs(5)).expect(name);
+            assert_eq!(response.status, 302, "{name}");
+            assert_eq!(
+                response.redirect,
+                Some(format!("{base}/elsewhere")),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn both_transports_send_a_body_as_a_form_with_the_same_credentials() {
+        let mut seen = Vec::new();
+        for (name, send) in TRANSPORTS {
+            let base = local_server(1);
+            let url = format!("{base}/echo");
+            let request =
+                Request::post(&url, "a=1&b=2".to_string()).with_basic_auth("user", "pa:ss");
+            let echoed = send(&request, &url, Duration::from_secs(5))
+                .expect(name)
+                .body
+                .to_lowercase();
+            assert!(
+                echoed.contains("content-type: application/x-www-form-urlencoded"),
+                "{name}: {echoed}"
+            );
+            assert!(echoed.ends_with("a=1&b=2"), "{name}: {echoed}");
+            let auth = echoed
+                .lines()
+                .find(|l| l.starts_with("authorization:"))
+                .map(str::to_string);
+            seen.push(auth.unwrap_or_else(|| panic!("{name} sent no credentials")));
+        }
+        assert_eq!(
+            seen[0], seen[1],
+            "the two transports must send the same credentials"
+        );
+    }
+
+    #[test]
+    fn a_redirect_target_is_resolved_as_curl_resolves_it() {
+        use super::via_ureq::absolute;
+        let base = "https://script.google.com/macros/s/abc/exec?k=1";
+        assert_eq!(
+            absolute(base, "https://other.example/x"),
+            "https://other.example/x"
+        );
+        assert_eq!(absolute(base, "//cdn.example/x"), "https://cdn.example/x");
+        assert_eq!(absolute(base, "/root"), "https://script.google.com/root");
+        assert_eq!(
+            absolute(base, "next"),
+            "https://script.google.com/macros/s/abc/next"
+        );
+        assert_eq!(
+            absolute("https://a.example", "next"),
+            "https://a.example/next"
+        );
+    }
+
+    #[test]
+    fn basic_credentials_are_encoded_as_standard_base64() {
+        use super::via_ureq::base64;
+        assert_eq!(base64("user:pass"), "dXNlcjpwYXNz");
+        assert_eq!(base64("a"), "YQ==");
+        assert_eq!(base64("ab"), "YWI=");
+        assert_eq!(base64("abc"), "YWJj");
+    }
+
+    #[test]
+    fn a_long_body_is_cut_on_a_character_boundary() {
+        let body = "₹".repeat(MAX_BODY);
+        let cut = capped(body);
+        assert!(cut.len() <= MAX_BODY && cut.len() > MAX_BODY - 3);
+        assert!(cut.chars().all(|c| c == '₹'));
+    }
+
+    #[test]
+    fn the_android_transport_reaches_a_real_https_server() {
+        // The rustls stack and its built-in roots, end to end.
+        let url = "https://api.github.com/rate_limit";
+        match super::via_ureq::send(&Request::get(url), url, Duration::from_secs(20)) {
+            Ok(response) => assert!(
+                response.ok() || response.status == 403,
+                "status {}",
+                response.status
+            ),
+            Err(HttpError::Unreachable { .. }) => {}
+            Err(other) => panic!("transport is broken: {other}"),
+        }
+    }
 
     /// Every option NEXUS writes into a curl config, checked by curl itself.
     ///
@@ -625,9 +945,15 @@ mod tests {
             .split_once("#[cfg(test)]")
             .map(|(before, _)| before)
             .expect("test module marker");
-        let sender = production.split_once("pub fn send_with_timeout").expect("sender").1;
+        let sender = production
+            .split_once("pub fn send_with_timeout")
+            .expect("sender")
+            .1;
         let body = &sender[..sender.find("\n}").expect("end")];
-        assert!(body.contains("request.url.trim().to_string()"), "the URL sent is the URL given");
+        assert!(
+            body.contains("request.url.trim().to_string()"),
+            "the URL sent is the URL given"
+        );
     }
 
     #[test]

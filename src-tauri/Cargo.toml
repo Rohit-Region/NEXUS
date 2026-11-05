@@ -57,3 +57,16 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2.11.3", features = [] }
 tauri-plugin-log = "2"
+
+# NEXUS mobile: HTTPS on Android, explicitly approved. The Mac sends through
+# the system `curl` (see `assistant/http.rs`), and Android has none, so only
+# the Android build carries a TLS stack: `ureq` over `rustls` with the Mozilla
+# root certificates built in. 11 crates the Android build did not already
+# have, and none in the Mac app.
+[target.'cfg(target_os = "android")'.dependencies]
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+
+# The same client in the Mac's tests, so both transports are checked against
+# each other there. A dev-dependency, so it never reaches the Mac app.
+[dev-dependencies]
+ureq = { version = "3", default-features = false, features = ["rustls"] }
