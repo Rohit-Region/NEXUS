@@ -18,8 +18,7 @@ interface Props {
   onRecategorise: (e: Expense, category: string) => void;
 }
 
-/** Every payment in the month, newest first, grouped by day. Changing a
- *  category here teaches NEXUS that payee for good. */
+/** Every payment in the month, newest first, grouped by day. */
 export function SpendTransactions({ rows, categories, filter, onFilter, onEdit, onRecategorise }: Props) {
   const shown = useMemo(() => {
     const q = filter.text.trim().toLowerCase();
@@ -41,7 +40,7 @@ export function SpendTransactions({ rows, categories, filter, onFilter, onEdit, 
     return out;
   }, [shown]);
 
-  const total = shown.filter((t) => t.kind === 'spend').reduce((s, t) => s + t.amountPaise, 0);
+  const total = shown.filter((t) => t.kind === 'spend').reduce((s, t) => s + (t.mySharePaise ?? t.amountPaise), 0);
   const filtered = filter.text || filter.category || filter.kind;
 
   return (
@@ -107,13 +106,14 @@ export function SpendTransactions({ rows, categories, filter, onFilter, onEdit, 
           <ul className="spend-tx__list">
             {g.rows.map((t) => (
               <li className="spend-tx__row" key={t.id}>
-                <button className="spend-tx__main" type="button" onClick={() => onEdit(t)} title="Edit">
+                <button className="spend-tx__main" type="button" onClick={() => onEdit(t)} title="Open">
                   <span className="spend-tx__payee">{t.payee}</span>
                   <span className="spend-tx__meta">
                     {t.account}
                     {t.channel && ` · ${t.channel}`}
                     {t.source === 'manual' && ' · added by you'}
                     {t.note && ` · ${t.note}`}
+                    {t.shares.length > 0 && ` · split with ${t.shares.map((s) => s.person).join(', ')}`}
                   </span>
                 </button>
                 <select
@@ -121,7 +121,6 @@ export function SpendTransactions({ rows, categories, filter, onFilter, onEdit, 
                   value={t.category}
                   onChange={(e) => onRecategorise(t, e.target.value)}
                   aria-label={`Category for ${t.payee}`}
-                  title="Change it once and NEXUS remembers it for this payee"
                 >
                   {categories.map((c) => (
                     <option key={c} value={c}>
@@ -131,7 +130,8 @@ export function SpendTransactions({ rows, categories, filter, onFilter, onEdit, 
                 </select>
                 <span className={`spend-amt spend-amt--${t.kind}`}>
                   {t.kind === 'income' || t.kind === 'refund' ? '+' : ''}
-                  {inr(t.amountPaise)}
+                  {inr(t.mySharePaise ?? t.amountPaise)}
+                  {t.mySharePaise !== null && <span className="spend-amt__kind">your share of {inr(t.amountPaise)}</span>}
                   {t.kind !== 'spend' && <span className="spend-amt__kind">{KIND_LABEL[t.kind]}</span>}
                 </span>
               </li>

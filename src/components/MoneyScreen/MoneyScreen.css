@@ -1059,3 +1059,26 @@
   outline: 2px solid var(--color-text-primary);
   outline-offset: 2px;
 }
+
+/* A policy with its own page: the group name opens it. */
+.money__group-link {
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.money__group-link:hover,
+.money__group-link:focus-visible {
+  color: var(--color-accent);
+}
+
+.money__group-open {
+  margin-left: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--color-accent);
+}

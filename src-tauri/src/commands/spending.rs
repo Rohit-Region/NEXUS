@@ -198,6 +198,8 @@ pub fn sync_once(state: &DbState) -> Result<SyncReport, String> {
     for row in &rows {
         book_row(&conn, row, &mut report)?;
     }
+    reread_set_aside(&conn, &mut report)?;
+    repair_card_accounts(&conn)?;
     put_setting(&conn, CURSOR_KEY, &last.max(cursor).to_string())?;
     put_setting(&conn, LAST_SYNC_KEY, &now_unix().to_string())?;
     put_setting(&conn, LAST_ERROR_KEY, "")?;
@@ -220,20 +222,91 @@ fn book_row(
     if fresh == 0 {
         return Ok(());
     }
+    if let (Some(balance), Some(at)) = (spend::stated_balance(&row.text), received) {
+        record_balance(conn, &spend::account_of(&row.from, &row.text), balance, at, "sms")?;
+    }
+    read_into_inbox(conn, &row.id, &row.from, &row.text, received, report)
+}
+
+/// The reason the user gives a message they set aside themselves. Those are
+/// never read again; everything else NEXUS set aside is.
+const SET_ASIDE_BY_USER: &str = "Set aside by you";
+
+/// Read messages NEXUS set aside again, so a reader that has since learned a
+/// format (a paid mandate, say) books what it once skipped. Only messages
+/// still set aside are touched, and booking is keyed by message, so nothing
+/// is counted twice.
+fn reread_set_aside(conn: &rusqlite::Connection, report: &mut SyncReport) -> Result<(), String> {
+    let mut stmt = conn
+        .prepare("SELECT sms_id, sender, text, received_at FROM sms_inbox WHERE status = 'ignored' AND reason != ?1")
+        .map_err(|e| e.to_string())?;
+    let rows: Vec<(String, String, String, Option<i64>)> = stmt
+        .query_map([SET_ASIDE_BY_USER], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+        .map_err(|e| e.to_string())?
+        .filter_map(Result::ok)
+        .collect();
+    for (id, from, text, received) in rows {
+        // One still set aside was counted when it first arrived.
+        let mut one = SyncReport::default();
+        read_into_inbox(conn, &id, &from, &text, received, &mut one)?;
+        report.added += one.added;
+        report.review += one.review;
+    }
+    Ok(())
+}
+
+/// Set once card accounts booked by the older reader have been re-read.
+const CARDS_REPAIRED_KEY: &str = "spend_card_accounts_repaired";
+
+/// The older reader took a payee's UPI ID ("*5111@ybl") for the card number,
+/// filing one card's payments under several cards. Re-read the account of
+/// every booked card payment from its message, once. Only card accounts are
+/// touched, and only to the card the message itself names.
+fn repair_card_accounts(conn: &rusqlite::Connection) -> Result<(), String> {
+    if setting(conn, CARDS_REPAIRED_KEY).is_some() {
+        return Ok(());
+    }
+    let mut stmt = conn
+        .prepare(
+            "SELECT e.id, e.account, i.sender, i.text FROM expenses e JOIN sms_inbox i ON i.sms_id = e.sms_id
+              WHERE e.source = 'sms' AND e.account LIKE '% card XX%'",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows: Vec<(i64, String, String, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+        .map_err(|e| e.to_string())?
+        .filter_map(Result::ok)
+        .collect();
+    for (id, account, sender, text) in rows {
+        let read = spend::account_of(&sender, &text);
+        if read != account && read.contains(" card XX") {
+            conn.execute("UPDATE expenses SET account = ?2 WHERE id = ?1", rusqlite::params![id, read])
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    put_setting(conn, CARDS_REPAIRED_KEY, "1")
+}
+
+/// Read one inbox message and book it, queue it for review, or set it aside.
+fn read_into_inbox(
+    conn: &rusqlite::Connection,
+    id: &str,
+    from: &str,
+    text: &str,
+    received: Option<i64>,
+    report: &mut SyncReport,
+) -> Result<(), String> {
     let mark = |status: &str, reason: &str, suggestion: &str| {
         conn.execute(
             "UPDATE sms_inbox SET status = ?2, reason = ?3, suggestion = ?4 WHERE sms_id = ?1",
-            rusqlite::params![row.id, status, reason, suggestion],
+            rusqlite::params![id, status, reason, suggestion],
         )
         .map_err(|e| e.to_string())
     };
     let received_on = received.map(|t| local_date(conn, t)).unwrap_or_else(|| today(conn));
-    if let (Some(balance), Some(at)) = (spend::stated_balance(&row.text), received) {
-        record_balance(conn, &spend::account_of(&row.from, &row.text), balance, at, "sms")?;
-    }
-    match read_sms(&row.from, &row.text, &received_on) {
+    match read_sms(from, text, &received_on) {
         Outcome::Booked(reading) => {
-            insert_from_reading(conn, &row.id, &row.text, received, &reading, &received_on)?;
+            insert_from_reading(conn, id, text, received, &reading, &received_on)?;
             mark("done", "", "")?;
             report.added += 1;
         }
@@ -276,7 +349,16 @@ fn record_balance(
     Ok(())
 }
 
-/// Every account's balance carried forward to now.
+/// A card account the bank never stated a positive available balance for
+/// is a credit card. A prepaid card ("loaded with Rs 2,500. The Available
+/// Balance is ...") is money held, like a bank account.
+fn is_credit_card(account: &str, stated: Option<(i64, &str)>) -> bool {
+    account.contains(" card") && !matches!(stated, Some((paise, "sms")) if paise > 0)
+}
+
+/// Every account's balance carried forward to now, and every credit card's
+/// dues: carried forward when the user has set them once, else only this
+/// month's purchases on it, marked as not the full amount owed.
 fn balances(conn: &rusqlite::Connection) -> Result<Vec<spend::Balance>, String> {
     let mut stmt = conn
         .prepare("SELECT account, balance_paise, as_of, source FROM account_balances ORDER BY account")
@@ -301,12 +383,40 @@ fn balances(conn: &rusqlite::Connection) -> Result<Vec<spend::Balance>, String> 
             .map_err(|e| e.to_string())?
             .filter_map(Result::ok)
             .collect();
+        let credit_card = is_credit_card(&account, Some((paise, source.as_str())));
         out.push(spend::Balance {
-            balance_paise: spend::carried_balance(paise, &moves),
+            balance_paise: spend::carried_balance(paise, &moves, credit_card),
             adjusted: moves.len() as u32,
             account,
             as_of,
             source,
+            credit_card,
+            known: true,
+        });
+    }
+
+    let month_start = format!("{}-01", today(conn).get(..7).unwrap_or(""));
+    let mut cards = conn
+        .prepare(
+            "SELECT account, SUM(CASE WHEN kind = 'spend' AND occurred_on >= ?1 THEN amount_paise ELSE 0 END)
+               FROM expenses WHERE account LIKE '% card%' GROUP BY account ORDER BY account",
+        )
+        .map_err(|e| e.to_string())?;
+    let unset: Vec<(String, i64)> = cards
+        .query_map([&month_start], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
+        .map_err(|e| e.to_string())?
+        .filter_map(Result::ok)
+        .filter(|(account, _)| !out.iter().any(|b| &b.account == account) && is_credit_card(account, None))
+        .collect();
+    for (account, spent) in unset {
+        out.push(spend::Balance {
+            account,
+            balance_paise: -spent,
+            as_of: 0,
+            source: String::new(),
+            adjusted: 0,
+            credit_card: true,
+            known: false,
         });
     }
     Ok(out)
@@ -508,7 +618,7 @@ fn expenses_between(
     let mut stmt = conn
         .prepare(
             "SELECT id, source, occurred_on, occurred_at, amount_paise, kind, payee, category,
-                    account, channel, note
+                    account, channel, note, my_share_paise
                FROM expenses WHERE occurred_on BETWEEN ?1 AND ?2",
         )
         .map_err(|e| e.to_string())?;
@@ -526,10 +636,30 @@ fn expenses_between(
                 account: r.get(8)?,
                 channel: r.get(9)?,
                 note: r.get(10)?,
+                my_share_paise: r.get(11)?,
+                shares: Vec::new(),
             })
         })
         .map_err(|e| e.to_string())?;
-    Ok(rows.filter_map(Result::ok).collect())
+    let mut rows: Vec<Expense> = rows.filter_map(Result::ok).collect();
+    for e in rows.iter_mut().filter(|e| e.my_share_paise.is_some()) {
+        e.shares = shares_of(conn, e.id)?;
+    }
+    Ok(rows)
+}
+
+fn shares_of(conn: &rusqlite::Connection, expense_id: i64) -> Result<Vec<spend::Share>, String> {
+    let mut stmt = conn
+        .prepare("SELECT id, person, amount_paise FROM expense_shares WHERE expense_id = ?1 ORDER BY id")
+        .map_err(|e| e.to_string())?;
+    let shares = stmt
+        .query_map([expense_id], |r| {
+            Ok(spend::Share { id: r.get(0)?, person: r.get(1)?, amount_paise: r.get(2)? })
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(Result::ok)
+        .collect();
+    Ok(shares)
 }
 
 fn month_bounds((y, m): (i64, u32), last_day: u32) -> (String, String) {
@@ -564,7 +694,7 @@ pub fn nexus_spend_month(state: State<'_, DbState>, month: Option<String>) -> Re
     let previous: i64 = expenses_between(&conn, &pf, &pt)?
         .iter()
         .filter(|e| e.kind == Kind::Spend)
-        .map(|e| e.amount_paise)
+        .map(Expense::counted_paise)
         .sum();
 
     let mut budgets = HashMap::new();
@@ -599,7 +729,9 @@ fn savings_history(
     let mut totals: HashMap<(String, String), (i64, i64)> = HashMap::new();
     let mut stmt = conn
         .prepare(
-            "SELECT substr(occurred_on, 1, 7), kind, SUM(amount_paise), MAX(amount_paise) FROM expenses
+            // A split payment counts as the user's share, as in the month view.
+            "SELECT substr(occurred_on, 1, 7), kind, SUM(COALESCE(my_share_paise, amount_paise)),
+                    MAX(amount_paise) FROM expenses
               WHERE occurred_on BETWEEN ?1 AND ?2 GROUP BY 1, 2",
         )
         .map_err(|e| e.to_string())?;
@@ -681,6 +813,7 @@ fn check(input: &ExpenseInput) -> Result<Checked, String> {
         return Err("Pick a category from the list.".to_string());
     }
     let kind = Kind::parse(&input.kind).ok_or("Pick spending, income, refund or transfer.")?;
+    let kind = kind_for_category(&input.category, kind);
     let account = input.account.trim();
     Ok(Checked {
         date: input.date.clone(),
@@ -757,15 +890,25 @@ pub fn nexus_spend_update(
     let conn = lock(&state)?;
     // The key stays the bank's name for the payee, whatever it is renamed to,
     // so a remembered rule keeps matching that payee's future messages.
-    let key: String = conn
-        .query_row("SELECT payee_key FROM expenses WHERE id = ?1", [id], |r| r.get(0))
+    let (key, split): (String, bool) = conn
+        .query_row("SELECT payee_key, my_share_paise IS NOT NULL FROM expenses WHERE id = ?1", [id], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
         .map_err(|_| "That expense no longer exists.".to_string())?;
+    // A split keeps everyone else's part as it was; the new amount changes
+    // only the user's own.
+    let my_share = if split {
+        let others: Vec<i64> = shares_of(&conn, id)?.iter().map(|s| s.amount_paise).collect();
+        Some(spend::my_share(c.paise, &others)?)
+    } else {
+        None
+    };
     conn.execute(
         "UPDATE expenses
             SET occurred_on = ?2, amount_paise = ?3, kind = ?4, payee = ?5,
-                category = ?6, account = ?7, note = ?8
+                category = ?6, account = ?7, note = ?8, my_share_paise = ?9
           WHERE id = ?1",
-        rusqlite::params![id, c.date, c.paise, c.kind.as_str(), c.payee, c.category, c.account, c.note],
+        rusqlite::params![id, c.date, c.paise, c.kind.as_str(), c.payee, c.category, c.account, c.note, my_share],
     )
     .map_err(|e| e.to_string())?;
     if remember_payee {
@@ -918,11 +1061,58 @@ pub fn nexus_spend_ignore(state: State<'_, DbState>, sms_id: String) -> Result<(
     spend_lock::check()?;
     let conn = lock(&state)?;
     conn.execute(
-        "UPDATE sms_inbox SET status = 'ignored', reason = 'Set aside by you' WHERE sms_id = ?1",
-        [sms_id],
+        "UPDATE sms_inbox SET status = 'ignored', reason = ?2 WHERE sms_id = ?1",
+        [sms_id.as_str(), SET_ASIDE_BY_USER],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+// -- Splitting ------------------------------------------------------------------
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShareInput {
+    pub person: String,
+    /// Rupees, as typed.
+    pub amount: f64,
+}
+
+/// Split a payment: `shares` are the other people and what each owes. An
+/// empty list undoes the split.
+#[tauri::command(async)]
+pub fn nexus_spend_split(state: State<'_, DbState>, id: i64, shares: Vec<ShareInput>) -> Result<(), String> {
+    spend_lock::check()?;
+    let mut parts = Vec::new();
+    for s in &shares {
+        let person: String = s.person.trim().chars().take(40).collect();
+        if person.is_empty() {
+            return Err("Give every person in the split a name.".to_string());
+        }
+        if !s.amount.is_finite() || s.amount <= 0.0 {
+            return Err(format!("Enter what {person} owes."));
+        }
+        parts.push((person, (s.amount * 100.0).round() as i64));
+    }
+    let mut conn = lock(&state)?;
+    let amount: i64 = conn
+        .query_row("SELECT amount_paise FROM expenses WHERE id = ?1", [id], |r| r.get(0))
+        .map_err(|_| "That expense no longer exists.".to_string())?;
+    let mine = spend::my_share(amount, &parts.iter().map(|p| p.1).collect::<Vec<_>>())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM expense_shares WHERE expense_id = ?1", [id])
+        .map_err(|e| e.to_string())?;
+    for (person, paise) in &parts {
+        tx.execute(
+            "INSERT INTO expense_shares (expense_id, person, amount_paise) VALUES (?1, ?2, ?3)",
+            rusqlite::params![id, person, paise],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    let my_share = (!parts.is_empty()).then_some(mine);
+    tx.execute("UPDATE expenses SET my_share_paise = ?2 WHERE id = ?1", rusqlite::params![id, my_share])
+        .map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

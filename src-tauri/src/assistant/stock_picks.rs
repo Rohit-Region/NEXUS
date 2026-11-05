@@ -56,7 +56,8 @@ const IN_FLIGHT: usize = 8;
 /// Headlines older than this do not count.
 const NEWS_DAYS: i64 = 7;
 
-static FUNDAMENTALS: Mutex<Option<(Instant, HashMap<String, Fundamentals>)>> = Mutex::new(None);
+/// Per symbol, so the Nifty 50 and the growth screen share one cache.
+static FUNDAMENTALS: Mutex<Option<HashMap<String, (Instant, Fundamentals)>>> = Mutex::new(None);
 static INPUTS: Mutex<Option<(Instant, Inputs)>> = Mutex::new(None);
 
 /// Everything fetched for a scoring run.
@@ -74,10 +75,14 @@ static GROWW_IDS: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
 /// the source data, not buying or selling.
 const MAX_STAKE_SHIFT: f64 = 8.0;
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Fundamentals {
     pub display_name: Option<String>,
+    /// Groww's industry name, for stocks outside the NSE lists that carry one.
+    pub industry: Option<String>,
+    /// In ₹ Cr.
+    pub market_cap: Option<f64>,
     pub pe: Option<f64>,
     pub industry_pe: Option<f64>,
     pub roe: Option<f64>,
@@ -183,8 +188,9 @@ fn fetch_inputs(refresh: bool, now: i64) -> Result<Inputs, String> {
     // so they are fetched side by side; one after the other doubles a cold load.
     let queries: Vec<String> = board.stocks.iter().map(|r| short_name(&r.name)).collect();
     let (fundamentals, news) = std::thread::scope(|scope| {
-        let f = scope.spawn(|| load_fundamentals(&board.stocks, refresh));
-        let n = in_chunks(&queries, |q| company_news(q, now));
+        let symbols: Vec<String> = board.stocks.iter().map(|r| r.symbol.clone()).collect();
+        let f = scope.spawn(move || fundamentals_for(&symbols, refresh));
+        let n = news_for(&queries, now);
         (f.join().expect("fundamentals worker panicked"), n)
     });
 
@@ -203,7 +209,7 @@ fn fetch_inputs(refresh: bool, now: i64) -> Result<Inputs, String> {
 }
 
 /// Run `f` over `items`, `IN_FLIGHT` at a time, results in input order.
-fn in_chunks<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
+pub(crate) fn in_chunks<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
     let mut out = Vec::with_capacity(items.len());
     for chunk in items.chunks(IN_FLIGHT) {
         let f = &f;
@@ -216,16 +222,23 @@ fn in_chunks<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R
     out
 }
 
-fn load_fundamentals(stocks: &[Row], refresh: bool) -> HashMap<String, Fundamentals> {
-    if !refresh {
-        if let Some((at, m)) = FUNDAMENTALS.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
-            if at.elapsed() < FUNDAMENTALS_FOR && !m.is_empty() {
-                return m.clone();
+/// Fundamentals for NSE symbols, fetching only those not cached fresh.
+/// Symbols Groww cannot answer for are left out of the map.
+pub fn fundamentals_for(symbols: &[String], refresh: bool) -> HashMap<String, Fundamentals> {
+    let mut map = HashMap::new();
+    let mut missing = Vec::new();
+    {
+        let cache = FUNDAMENTALS.lock().unwrap_or_else(|e| e.into_inner());
+        for s in symbols {
+            match cache.as_ref().and_then(|c| c.get(s)) {
+                Some((at, f)) if !refresh && at.elapsed() < FUNDAMENTALS_FOR => {
+                    map.insert(s.clone(), f.clone());
+                }
+                _ => missing.push(s.clone()),
             }
         }
     }
-    let symbols: Vec<String> = stocks.iter().map(|r| r.symbol.clone()).collect();
-    let results = in_chunks(&symbols, |s| {
+    let results = in_chunks(&missing, |s| {
         let known = GROWW_IDS.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(s).cloned());
         let id = match known {
             Some(id) => id,
@@ -241,23 +254,22 @@ fn load_fundamentals(stocks: &[Row], refresh: bool) -> HashMap<String, Fundament
         };
         groww::company(&id).map(|v| parse_fundamentals(&v))
     });
-    let mut map = HashMap::new();
-    for (s, r) in symbols.into_iter().zip(results) {
+    let mut cache = FUNDAMENTALS.lock().unwrap_or_else(|e| e.into_inner());
+    let cache = cache.get_or_insert_with(HashMap::new);
+    for (s, r) in missing.into_iter().zip(results) {
         match r {
             Ok(f) => {
+                cache.insert(s.clone(), (Instant::now(), f.clone()));
                 map.insert(s, f);
             }
             Err(e) => log::warn!("stock_picks: fundamentals for {s}: {e}"),
         }
     }
-    if !map.is_empty() {
-        *FUNDAMENTALS.lock().unwrap_or_else(|e| e.into_inner()) = Some((Instant::now(), map.clone()));
-    }
     map
 }
 
 /// "Reliance Industries Limited" -> "Reliance Industries", for a news search.
-fn short_name(name: &str) -> String {
+pub(crate) fn short_name(name: &str) -> String {
     let mut s = name.trim().to_string();
     for suffix in [" Limited", " Ltd.", " Ltd", " LIMITED", " LTD"] {
         if let Some(stripped) = s.strip_suffix(suffix) {
@@ -268,7 +280,7 @@ fn short_name(name: &str) -> String {
 }
 
 /// Quarter labels ("Sep '26") as a sortable month count.
-fn quarter_key(label: &str) -> Option<i64> {
+pub(crate) fn quarter_key(label: &str) -> Option<i64> {
     const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     let (m, y) = label.split_once(" '")?;
     let month = MONTHS.iter().position(|x| *x == m.trim())? as i64;
@@ -276,10 +288,15 @@ fn quarter_key(label: &str) -> Option<i64> {
     Some(year * 12 + month)
 }
 
-fn parse_fundamentals(v: &Value) -> Fundamentals {
+pub(crate) fn parse_fundamentals(v: &Value) -> Fundamentals {
     let mut f = Fundamentals {
         display_name: v
             .pointer("/header/displayName")
+            .and_then(|n| n.as_str())
+            .map(|n| n.trim().to_string())
+            .filter(|n| !n.is_empty()),
+        industry: v
+            .pointer("/header/industryName")
             .and_then(|n| n.as_str())
             .map(|n| n.trim().to_string())
             .filter(|n| !n.is_empty()),
@@ -291,6 +308,7 @@ fn parse_fundamentals(v: &Value) -> Fundamentals {
             let name = item.get("name").and_then(|n| n.as_str()).unwrap_or("");
             let value = item.get("value").and_then(|n| n.as_str()).and_then(groww::number);
             match name {
+                "Market Cap" => f.market_cap = value,
                 "ROE" => f.roe = value,
                 "P/E Ratio(TTM)" => f.pe = value,
                 "Industry P/E" => f.industry_pe = value,
@@ -370,6 +388,43 @@ pub fn tone(title: &str) -> i8 {
     }
 }
 
+/// Headlines per company name, cached for half an hour so the Nifty 50
+/// screen and the High-volatility division do not ask Google twice.
+type NewsCache = HashMap<String, (Instant, Vec<Headline>)>;
+static NEWS: Mutex<Option<NewsCache>> = Mutex::new(None);
+const NEWS_FOR: Duration = Duration::from_secs(30 * 60);
+
+/// This week's headlines for each company name, in input order; `Err` for
+/// a name whose search failed.
+pub(crate) fn news_for(names: &[String], now: i64) -> Vec<Result<Vec<Headline>, String>> {
+    in_chunks(names, |name| {
+        if let Some((at, h)) = NEWS.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|c| c.get(name)) {
+            if at.elapsed() < NEWS_FOR {
+                return Ok(h.clone());
+            }
+        }
+        let h = company_news(name, now)?;
+        NEWS.lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get_or_insert_with(HashMap::new)
+            .insert(name.clone(), (Instant::now(), h.clone()));
+        Ok(h)
+    })
+}
+
+/// Headline tone summed with recent ones counting most, as 0..1 (0.5 is
+/// neutral). Shared by the Nifty 50 score and the High-volatility division.
+pub(crate) fn news_score(headlines: &[Headline], now: i64) -> f64 {
+    let raw: f64 = headlines
+        .iter()
+        .map(|h| {
+            let age_days = h.published.map(|p| (now - p).max(0) as f64 / 86_400.0).unwrap_or(3.0);
+            h.tone as f64 * (-age_days / 4.0).exp()
+        })
+        .sum();
+    0.5 + 0.5 * (raw / 2.5).tanh()
+}
+
 fn company_news(name: &str, now: i64) -> Result<Vec<Headline>, String> {
     let q = format!("\"{name}\" share when:{NEWS_DAYS}d");
     let url = format!(
@@ -405,7 +460,7 @@ fn company_news(name: &str, now: i64) -> Result<Vec<Headline>, String> {
 }
 
 /// Each value's rank among the present ones, 0 (lowest) to 1 (highest).
-fn percentiles(values: &[Option<f64>]) -> Vec<Option<f64>> {
+pub(crate) fn percentiles(values: &[Option<f64>]) -> Vec<Option<f64>> {
     let mut present: Vec<f64> = values.iter().flatten().copied().collect();
     present.sort_by(|a, b| a.total_cmp(b));
     let n = present.len();
@@ -425,7 +480,7 @@ fn percentiles(values: &[Option<f64>]) -> Vec<Option<f64>> {
 }
 
 /// Weighted mean of the present parts, `None` when none are.
-fn blend(parts: &[(Option<f64>, f64)]) -> Option<f64> {
+pub(crate) fn blend(parts: &[(Option<f64>, f64)]) -> Option<f64> {
     let (sum, w) = parts
         .iter()
         .filter_map(|(v, w)| v.map(|v| (v * w, *w)))
@@ -433,7 +488,7 @@ fn blend(parts: &[(Option<f64>, f64)]) -> Option<f64> {
     (w > 0.0).then(|| sum / w)
 }
 
-fn neg(v: Option<f64>) -> Option<f64> {
+pub(crate) fn neg(v: Option<f64>) -> Option<f64> {
     v.map(|x| -x)
 }
 
@@ -486,16 +541,7 @@ fn score_all(
             let smart = blend(&[(inst[i], 0.7), (promoter, 0.3)]);
 
             let headlines = news[i].clone();
-            let news_s = headlines.as_ref().map(|hs| {
-                let raw: f64 = hs
-                    .iter()
-                    .map(|h| {
-                        let age_days = h.published.map(|p| (now - p).max(0) as f64 / 86_400.0).unwrap_or(3.0);
-                        h.tone as f64 * (-age_days / 4.0).exp()
-                    })
-                    .sum();
-                0.5 + 0.5 * (raw / 2.5).tanh()
-            });
+            let news_s = headlines.as_ref().map(|hs| news_score(hs, now));
 
             let factors: Vec<Factor> = [momentum, fundamentals_s, news_s, smart, valuation]
                 .into_iter()

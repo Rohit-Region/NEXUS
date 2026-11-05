@@ -3,7 +3,9 @@
 
 use tauri::State;
 
-use crate::assistant::portfolio_chat::{read, Action, Reading};
+use crate::assistant::policy_plan;
+use crate::assistant::portfolio_chat::{read, ulip_fund_name, Action, Reading, PNB_METLIFE_GROUP, TATA_AIA_GROUP};
+use crate::assistant::ulip_switch::{self, day_of, History, SwitchReport};
 use crate::db::DbState;
 
 #[derive(serde::Serialize)]
@@ -24,6 +26,202 @@ pub fn nexus_portfolio_chat(text: String) -> Preview {
 
 fn today(conn: &rusqlite::Connection) -> String {
     conn.query_row("SELECT date('now','localtime')", [], |r| r.get(0)).unwrap_or_default()
+}
+
+/// Update each ULIP holding's NAV when a newer one is published, PNB
+/// MetLife's from the insurer and Tata AIA's from Morningstar, and record
+/// every Tata AIA fund's daily NAV, since Tata AIA publishes no history of
+/// its own. The lock is released while the pages are fetched. Returns how
+/// many holdings changed.
+pub fn refresh_ulip_navs(db: &DbState) -> Result<usize, String> {
+    use crate::assistant::{ulip_nav, ulip_switch};
+    let held: Vec<(i64, String, String, String)> = {
+        let conn = db.0.lock().map_err(|e| format!("Lock error: {e}"))?;
+        let mut stmt = conn
+            .prepare("SELECT id, symbol, broker, COALESCE(price_as_of, '') FROM holdings WHERE kind = 'ulip'")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .map_err(|e| e.to_string())?
+            .filter_map(Result::ok)
+            .collect();
+        rows
+    };
+    let fund_of = |code: &str, group: &str| ulip_fund_name(code, group).and_then(|name| ulip_switch::find(group, name));
+
+    let mut updates = Vec::new();
+    let now = now();
+    for (id, code, _, as_of) in held.iter().filter(|(_, _, broker, _)| broker == PNB_METLIFE_GROUP) {
+        let Some(fund) = fund_of(code, PNB_METLIFE_GROUP) else { continue };
+        // One fund failing to price leaves its last NAV and the others go on.
+        match ulip_switch::latest_pnb(fund.name, now) {
+            Ok((nav, date)) if date.as_str() > as_of.as_str() => updates.push((*id, nav, date)),
+            Ok(_) => {}
+            Err(e) => log::warn!("{code} NAV: {e}"),
+        }
+    }
+
+    let mut logged = Vec::new();
+    if held.iter().any(|(_, _, broker, _)| broker == TATA_AIA_GROUP) {
+        let navs = ulip_nav::fetch(ulip_nav::TATA_LIST)?;
+        let priced = |fund: &ulip_switch::Fund| {
+            let name = fund.morningstar?;
+            navs.iter().find(|n| ulip_nav::same_name(&n.name, name))
+        };
+        for (id, code, _, as_of) in held.iter().filter(|(_, _, broker, _)| broker == TATA_AIA_GROUP) {
+            if let Some(n) = fund_of(code, TATA_AIA_GROUP).and_then(priced) {
+                if n.date.as_str() > as_of.as_str() {
+                    updates.push((*id, n.nav, n.date.clone()));
+                }
+            }
+        }
+        for fund in ulip_switch::TATA_FUNDS {
+            if let Some(n) = priced(fund) {
+                logged.push((fund.label, n.date.clone(), n.nav));
+            }
+        }
+    }
+
+    let conn = db.0.lock().map_err(|e| format!("Lock error: {e}"))?;
+    for (id, nav, date) in &updates {
+        conn.execute(
+            "UPDATE holdings SET unit_price = ?2, price_as_of = ?3 WHERE id = ?1",
+            rusqlite::params![id, nav, date],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    for (label, date, nav) in &logged {
+        conn.execute(
+            "INSERT OR IGNORE INTO ulip_nav_log (policy, fund, day, nav) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![TATA_AIA_GROUP, label, date, nav],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(updates.len())
+}
+
+fn now() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
+}
+
+/// A policy's recorded daily NAVs, by fund label, oldest first.
+fn read_log(conn: &rusqlite::Connection, group: &str) -> Result<Vec<(String, History)>, String> {
+    let mut stmt = conn
+        .prepare("SELECT fund, day, nav FROM ulip_nav_log WHERE policy = ?1 ORDER BY fund, day")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([group], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, f64>(2)?)))
+        .map_err(|e| e.to_string())?
+        .filter_map(Result::ok);
+    let mut out: Vec<(String, History)> = Vec::new();
+    for (fund, day, nav) in rows {
+        let Some(day) = day_of(&day) else { continue };
+        match out.last_mut() {
+            Some((f, h)) if *f == fund => h.push((day, nav)),
+            _ => out.push((fund, vec![(day, nav)])),
+        }
+    }
+    Ok(out)
+}
+
+/// A policy's switch report for the funds held in it, with advice for its
+/// terms once they are saved. The fetch takes a few seconds, so the lock is
+/// released first.
+#[tauri::command(async)]
+pub fn nexus_ulip_switch_report(state: State<'_, DbState>, group: String, refresh: bool) -> Result<SwitchReport, String> {
+    let (held, prices, logged, plan) = {
+        let conn = state.0.lock().map_err(|e| format!("Lock error: {e}"))?;
+        let mut stmt = conn
+            .prepare("SELECT symbol, quantity, COALESCE(unit_price, 0), COALESCE(price_as_of, '') FROM holdings WHERE kind = 'ulip' AND broker = ?1")
+            .map_err(|e| e.to_string())?;
+        let rows: Vec<(String, f64, f64, String)> = stmt
+            .query_map([&group], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?, r.get::<_, f64>(2)?, r.get::<_, String>(3)?))
+            })
+            .map_err(|e| e.to_string())?
+            .filter_map(Result::ok)
+            .filter_map(|(code, units, price, as_of)| {
+                let fund = ulip_fund_name(&code, &group).and_then(|name| ulip_switch::find(&group, name))?;
+                Some((fund.label.to_string(), units, price, as_of))
+            })
+            .collect();
+        let held: Vec<(String, f64)> = rows.iter().map(|r| (r.0.clone(), r.1)).collect();
+        let prices: Vec<(String, f64, String)> =
+            rows.into_iter().filter(|r| r.2 > 0.0 && !r.3.is_empty()).map(|r| (r.0, r.2, r.3)).collect();
+        (held, prices, read_log(&conn, &group)?, read_plan(&conn, &group)?)
+    };
+    let now = now();
+    let mut report = ulip_switch::build(&group, &held, &logged, &prices, refresh, now)?;
+    if let Some(plan) = plan {
+        let value: f64 = report.held.iter().map(|h| h.value).sum();
+        report.plan = Some(policy_plan::advise(&plan, &report, value, india_day(now)));
+    }
+    Ok(report)
+}
+
+/// Today's day number in India, where the policies and their NAVs are.
+fn india_day(now: i64) -> i64 {
+    (now + 5 * 3600 + 1800).div_euclid(86_400)
+}
+
+fn read_plan(conn: &rusqlite::Connection, group: &str) -> Result<Option<policy_plan::Plan>, String> {
+    use rusqlite::OptionalExtension;
+    conn.query_row(
+        "SELECT started, monthly_premium, pay_years, term_years, birth_year, retire_age FROM policy_plans WHERE name = ?1",
+        [group],
+        |r| {
+            Ok(policy_plan::Plan {
+                started: r.get(0)?,
+                monthly_premium: r.get(1)?,
+                pay_years: r.get(2)?,
+                term_years: r.get(3)?,
+                birth_year: r.get(4)?,
+                retire_age: r.get(5)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+/// Save a policy's terms and the holder's retirement.
+#[tauri::command(async)]
+pub fn nexus_policy_plan_save(state: State<'_, DbState>, group: String, plan: policy_plan::Plan) -> Result<(), String> {
+    if ulip_switch::policy(&group).is_none() {
+        return Err(format!("{group} has no fund report."));
+    }
+    plan.check(crate::assistant::mf_connector::civil_from_days(india_day(now())).0)?;
+    let conn = state.0.lock().map_err(|e| format!("Lock error: {e}"))?;
+    conn.execute(
+        "INSERT INTO policy_plans (name, started, monthly_premium, pay_years, term_years, birth_year, retire_age)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         ON CONFLICT(name) DO UPDATE SET started = excluded.started, monthly_premium = excluded.monthly_premium,
+           pay_years = excluded.pay_years, term_years = excluded.term_years, birth_year = excluded.birth_year,
+           retire_age = excluded.retire_age",
+        rusqlite::params![group, plan.started, plan.monthly_premium, plan.pay_years, plan.term_years, plan.birth_year, plan.retire_age],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[derive(serde::Serialize)]
+pub struct FundHistory {
+    pub label: String,
+    /// (yyyy-mm-dd, NAV), oldest first.
+    pub navs: Vec<(String, f64)>,
+}
+
+/// NAVs of a policy's named funds, for its page's charts.
+#[tauri::command(async)]
+pub fn nexus_ulip_fund_history(state: State<'_, DbState>, group: String, labels: Vec<String>) -> Result<Vec<FundHistory>, String> {
+    let logged = {
+        let conn = state.0.lock().map_err(|e| format!("Lock error: {e}"))?;
+        read_log(&conn, &group)?
+    };
+    Ok(ulip_switch::histories_of(&group, &labels, &logged, now())
+        .into_iter()
+        .map(|(label, navs)| FundHistory { label, navs })
+        .collect())
 }
 
 /// Apply confirmed actions in one transaction: all of them or none.
@@ -104,8 +302,7 @@ fn apply(conn: &rusqlite::Connection, action: &Action) -> Result<String, String>
                 return Err(format!("{symbol} is not in your portfolio yet."));
             }
         }
-        Action::UlipFund { code, name, units, nav } => {
-            let group = crate::assistant::portfolio_chat::TATA_AIA_GROUP;
+        Action::UlipFund { code, name, group, units, nav } => {
             let id: Option<i64> = conn
                 .query_row(
                     "SELECT id FROM holdings WHERE kind = 'ulip' AND symbol = ?1 AND broker = ?2",

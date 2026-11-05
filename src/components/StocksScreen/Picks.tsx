@@ -2,32 +2,37 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ExternalLink } from 'lucide-react';
 import {
   fundPicks,
+  growthPicks,
+  investRisk,
   openUrl,
-  pickTrackRecord,
+  setInvestRisk,
   stockPicks,
   type FundPick,
   type FundPicks,
   type ScoreFactor,
   type StockPick,
   type StockPicks,
-  type PickGroupRecord,
-  type TrackRecord,
+  type DivisionKind,
+  type GrowthPick,
+  type GrowthPicks,
+  type Prediction,
+  type RiskLevel,
 } from '../../lib/nexus-db';
 
-const inr = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2, minimumFractionDigits: 2 });
-const whole = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 });
+export const inr = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2, minimumFractionDigits: 2 });
+export const whole = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 });
 
-function signed(n: number | null, digits = 1, unit = '%'): string {
+export function signed(n: number | null, digits = 1, unit = '%'): string {
   if (n === null) return '–';
   return `${n > 0 ? '+' : ''}${n.toFixed(digits)}${unit}`;
 }
 
-function tone(n: number | null): string {
+export function tone(n: number | null): string {
   if (n === null || n === 0) return '';
   return n > 0 ? 'stocks__up' : 'stocks__down';
 }
 
-function errText(err: unknown): string {
+export function errText(err: unknown): string {
   return String(err).replace(/^Error:\s*/, '');
 }
 
@@ -82,167 +87,7 @@ function Notes({ reasons, risks }: { reasons: string[]; risks: string[] }) {
   );
 }
 
-/** A journal day number (days since 1970-01-01) as "26 Oct". */
-function dayLabel(day: number): string {
-  return new Date(day * 86_400_000).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' });
-}
-
-function OutcomeTable({ groups, horizons, against }: { groups: PickGroupRecord[]; horizons: number[]; against: string }) {
-  return (
-    <table className="track-table">
-      <thead>
-        <tr>
-          <th scope="col" />
-          {horizons.map((h) => (
-            <th scope="col" key={h} title={`${h} trading sessions later`}>
-              After {h}d
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {groups.map((g) => (
-          <tr key={g.label}>
-            <th scope="row">{g.label}</th>
-            {g.outcomes.map((o, i) => (
-              <td key={horizons[i]}>
-                {o.count === 0 ? (
-                  <span className="stocks__dim">pending</span>
-                ) : (
-                  <>
-                    <span className={tone(o.avgExcess)}>{signed(o.avgExcess)}</span>
-                    <span className="track-table__sub">
-                      {Math.round((o.hitRate ?? 0) * 100)}% beat {against} · {o.count}
-                    </span>
-                  </>
-                )}
-              </td>
-            ))}
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-/**
- * How past suggestions turned out. Loaded after the suggestions themselves,
- * so today's record is already written when it is read.
- */
-function TrackRecordPanel({ kind, after }: { kind: 'stocks' | 'funds'; after: unknown }) {
-  const [rec, setRec] = useState<TrackRecord | null>(null);
-  const [open, setOpen] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!after) return;
-    let alive = true;
-    pickTrackRecord()
-      .then((r) => alive && setRec(r))
-      .catch((err) => alive && setError(errText(err)));
-    return () => {
-      alive = false;
-    };
-  }, [after]);
-
-  if (error) return <p className="stocks__note">Track record unavailable: {error}</p>;
-  if (!rec) return null;
-
-  const days = kind === 'stocks' ? rec.stockDays : rec.fundDays;
-  const l = rec.learning;
-  const since = rec.firstDay !== null ? ` since ${dayLabel(rec.firstDay)}` : '';
-  const summary =
-    kind === 'stocks'
-      ? l.active
-        ? `Learning on: weights tuned from ${l.days} days of outcomes (${Math.round(l.confidence * 100)}% confidence).`
-        : `Weights learn after ${l.needed} days with 20-day outcomes (${l.days} so far).`
-      : 'Fund weights stay fixed; outcomes are tracked against the average fund.';
-
-  return (
-    <section className="track">
-      <button className="track__head" type="button" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        <span className="track__title">Track record</span>
-        <span className="stocks__dim">
-          {days} day{days === 1 ? '' : 's'} recorded{since}. {summary}
-        </span>
-        <span className="track__toggle">{open ? 'Hide' : 'Show'}</span>
-      </button>
-      {open && (
-        <div className="track__body">
-          {kind === 'stocks' ? (
-            <>
-              <p className="stocks__rule">
-                Average return beyond the Nifty after each suggestion, and how often it beat the Nifty. Outcomes
-                fill in as each window passes.
-              </p>
-              <OutcomeTable groups={rec.stocks} horizons={rec.horizons} against="Nifty" />
-              <h3 className="track__sub">What each factor has been worth</h3>
-              <ul className="track-skill">
-                {l.factors.map((f) => (
-                  <li key={f.name}>
-                    <span>{f.name}</span>
-                    <span
-                      className={tone(f.skill)}
-                      title="Rank correlation between the factor and 20-day return beyond the Nifty, averaged over days"
-                    >
-                      skill {f.skill === null ? 'n/a' : f.skill.toFixed(2)}
-                    </span>
-                    <span className="stocks__dim">
-                      weight {f.baseWeight.toFixed(0)}
-                      {Math.abs(f.weight - f.baseWeight) >= 0.05 && ` → ${f.weight.toFixed(1)}`}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-              {rec.recent.length > 0 && (
-                <>
-                  <h3 className="track__sub">Recent Buy and Accumulate calls</h3>
-                  <table className="track-table">
-                    <thead>
-                      <tr>
-                        <th scope="col">Day</th>
-                        <th scope="col">Stock</th>
-                        {rec.horizons.map((h) => (
-                          <th scope="col" key={h}>
-                            vs Nifty {h}d
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rec.recent.map((p) => (
-                        <tr key={`${p.day}-${p.symbol}`}>
-                          <td>{dayLabel(p.day)}</td>
-                          <td>
-                            {p.symbol} <span className="stocks__dim">{p.verdict}</span>
-                          </td>
-                          {p.excess.map((x, i) => (
-                            <td key={rec.horizons[i]} className={tone(x)}>
-                              {x === null ? <span className="stocks__dim">pending</span> : signed(x)}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </>
-              )}
-            </>
-          ) : (
-            <>
-              <p className="stocks__rule">
-                Average return beyond the average small-cap fund ranked the same day, and how often it beat it.
-              </p>
-              <OutcomeTable groups={rec.funds} horizons={rec.horizons} against="peers" />
-            </>
-          )}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function verdictClass(v: string): string {
+export function verdictClass(v: string): string {
   return `pick-verdict pick-verdict--${v.toLowerCase().replace(/\s+/g, '-')}`;
 }
 
@@ -325,7 +170,6 @@ export function SuggestionsView({ refreshSeq }: { refreshSeq: number }) {
   return (
     <div className="picks">
       {status && <p className="stocks__status">{status}</p>}
-      <TrackRecordPanel kind="stocks" after={data} />
       <p className="stocks__rule">
         Each stock is scored out of 100 on momentum vs the Nifty, fundamentals, this week’s news, institutional buying
         and valuation vs its industry (weights:{' '}
@@ -453,26 +297,222 @@ function readBudget(): number {
   }
 }
 
-/**
- * Suits for you: actively managed small-cap funds ranked for a small monthly
- * SIP, filtered to what the entered amount can start.
- */
-export function FundsView({ refreshSeq }: { refreshSeq: number }) {
-  const [data, setData] = useState<FundPicks | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
-  const [budget, setBudget] = useState(readBudget);
+/** Expected move, range, odds, target and stop for one pick. */
+export function PredictionBox({ p, price }: { p: Prediction; price: number }) {
+  const days = p.sessions === 5 ? 'a week' : p.sessions === 20 ? 'a month' : 'three months';
+  return (
+    <div className="pick-predict" title={`Basis: ${p.basis}`}>
+      <span className="pick-predict__head">Prediction, next {days}</span>
+      <span>
+        <strong className={tone(p.expected)}>{signed(p.expected)}</strong>{' '}
+        <span className="stocks__dim">
+          likely {signed(p.low)} to {signed(p.high)} · {Math.round(p.probUp * 100)}% chance up
+        </span>
+      </span>
+      <span>
+        Target <strong>₹{inr.format(p.target)}</strong> · stop-loss <strong>₹{inr.format(p.stop)}</strong>
+        <span className="stocks__dim"> from ₹{inr.format(price)}</span>
+      </span>
+      <span className="stocks__dim pick-predict__basis">
+        {p.basis === 'model' ? 'Model estimate from its volatility and score' : `From ${p.basis}`}
+      </span>
+    </div>
+  );
+}
 
-  const load = useCallback(async (refresh: boolean) => {
-    setStatus('Reading every small-cap fund’s record, risk, cost and portfolio…');
-    try {
-      setData(await fundPicks(refresh));
-      setStatus(null);
-    } catch (err) {
-      setStatus(`Could not rank funds: ${errText(err)}`);
+function GrowthCard({ p }: { p: GrowthPick }) {
+  const [open, setOpen] = useState(false);
+  const f = p.fundamentals;
+  return (
+    <article className="pick">
+      <header className="pick__head">
+        <div>
+          <span className="pick__symbol">{p.symbol}</span>
+          <span className="pick__name">
+            {p.name} · {p.industry}
+          </span>
+        </div>
+        <span className={verdictClass(p.verdict)}>{p.verdict}</span>
+        <span className="pick__score" title="Score out of 100">
+          {Math.round(p.score)}
+        </span>
+      </header>
+      <p className="pick__line">
+        ₹{inr.format(p.price)} · 1W <span className={tone(p.ret1w)}>{signed(p.ret1w)}</span> · 3M{' '}
+        <span className={tone(p.ret3m)}>{signed(p.ret3m)}</span>
+        {p.volatility !== null && <span className="stocks__dim"> · swings {p.volatility.toFixed(0)}%/yr</span>}
+      </p>
+      <p className="pick__buy">
+        {p.shares} share{p.shares === 1 ? '' : 's'} for ₹{whole.format(p.cost)}
+        <span className="stocks__dim"> · {p.index}</span>
+      </p>
+      {p.prediction && <PredictionBox p={p.prediction} price={p.price} />}
+      <Notes reasons={p.reasons} risks={p.risks} />
+      <button className="pick__more" type="button" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        {open ? 'Hide detail' : 'Score and company'}
+      </button>
+      {open && (
+        <div className="pick__detail">
+          <Factors factors={p.factors} />
+          <dl className="fund-stats">
+            <div>
+              <dt>Revenue</dt>
+              <dd className={tone(f.revenueGrowth)}>{signed(f.revenueGrowth, 0)}</dd>
+            </div>
+            <div>
+              <dt>Profit</dt>
+              <dd className={tone(f.profitGrowth)}>{signed(f.profitGrowth, 0)}</dd>
+            </div>
+            <div>
+              <dt>ROE</dt>
+              <dd>{f.roe === null ? '–' : `${f.roe.toFixed(1)}%`}</dd>
+            </div>
+            <div>
+              <dt>P/E</dt>
+              <dd>{f.pe === null ? '–' : f.pe.toFixed(1)}</dd>
+            </div>
+            <div>
+              <dt>Debt/Equity</dt>
+              <dd>{f.debtEquity === null ? '–' : f.debtEquity.toFixed(2)}</dd>
+            </div>
+            <div>
+              <dt>Market cap</dt>
+              <dd>{f.marketCap === null ? '–' : `₹${whole.format(f.marketCap)} Cr`}</dd>
+            </div>
+          </dl>
+          {p.headlines.length > 0 && (
+            <ul className="pick-news">
+              {p.headlines.map((h) => (
+                <li key={h.link}>
+                  <span className={`pick-news__dot pick-news__dot--${h.tone > 0 ? 'up' : h.tone < 0 ? 'down' : 'flat'}`} />
+                  <button type="button" className="pick-news__link" onClick={() => void openUrl(h.link)}>
+                    {h.title}
+                  </button>
+                  <span className="stocks__dim"> · {h.source}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </article>
+  );
+}
+
+const fundName = (name: string) => name.replace(/\s+Direct.*$/i, '');
+
+/** Share of the monthly amount for the fund core and each division. */
+const SPLITS: Record<RiskLevel, { fund: number; steady: number; balanced: number; volatile: number; note: string }> = {
+  cautious: { fund: 0.8, steady: 0.2, balanced: 0, volatile: 0, note: 'Mostly the fund; a little in the calmest stocks.' },
+  balanced: { fund: 0.6, steady: 0.2, balanced: 0.2, volatile: 0, note: 'A fund core, with steady and balanced stocks around it.' },
+  aggressive: { fund: 0.4, steady: 0, balanced: 0.3, volatile: 0.3, note: 'A smaller core; more in balanced and short-term stocks.' },
+};
+
+interface PlanLine {
+  amount: number;
+  text: string;
+  detail: string;
+}
+
+/**
+ * Split the amount by risk level, fill each slice with the best thing it can
+ * buy, and return whatever no stock fits to the fund.
+ */
+function buildPlan(budget: number, risk: RiskLevel, funds: FundPick[], growth: GrowthPicks | null): PlanLine[] {
+  const split = SPLITS[risk];
+  const lines: PlanLine[] = [];
+  let toFund = budget * split.fund;
+  for (const kind of ['steady', 'balanced', 'volatile'] as DivisionKind[]) {
+    const slice = budget * split[kind];
+    if (slice <= 0) continue;
+    const div = growth?.divisions.find((d) => d.kind === kind);
+    const pick = div?.picks.find((p) => (p.verdict === 'Buy' || p.verdict === 'Accumulate') && p.price <= slice);
+    if (!div || !pick) {
+      toFund += slice;
+      continue;
     }
+    const shares = Math.floor(slice / pick.price);
+    const cost = shares * pick.price;
+    toFund += slice - cost;
+    const pr = pick.prediction;
+    lines.push({
+      amount: cost,
+      text: `${shares} × ${pick.symbol} (${div.label})`,
+      detail: pr
+        ? `score ${Math.round(pick.score)}, expects ${signed(pr.expected)} over ${pr.sessions} sessions; stop-loss ₹${inr.format(pr.stop)}`
+        : `score ${Math.round(pick.score)}`,
+    });
+  }
+  const fund = funds.find((f) => f.minSip === null || f.minSip <= toFund);
+  if (fund && toFund >= 1) {
+    lines.unshift({
+      amount: toFund,
+      text: `SIP in ${fundName(fund.name)}`,
+      detail: `the core: spreads it across a hundred-odd small companies, score ${Math.round(fund.score)}`,
+    });
+  }
+  return lines;
+}
+
+const RISK_LABEL: Record<RiskLevel, string> = { cautious: 'Cautious', balanced: 'Balanced', aggressive: 'Aggressive' };
+
+/**
+ * Suits for you: what a small monthly amount can buy, sized to the
+ * investor's risk level. Mid and small caps in three divisions by how much
+ * they swing, each with a score and a prediction, and small-cap funds as the
+ * core. Stocks already held are left out.
+ */
+export function SuitsView({ refreshSeq }: { refreshSeq: number }) {
+  const [funds, setFunds] = useState<FundPicks | null>(null);
+  const [growth, setGrowth] = useState<GrowthPicks | null>(null);
+  const [fundStatus, setFundStatus] = useState<string | null>(null);
+  const [growthStatus, setGrowthStatus] = useState<string | null>(null);
+  const [budget, setBudget] = useState(readBudget);
+  const [risk, setRisk] = useState<RiskLevel>('balanced');
+  const [division, setDivision] = useState<DivisionKind>('steady');
+
+  useEffect(() => {
+    investRisk()
+      .then(setRisk)
+      .catch(() => undefined);
   }, []);
 
-  useRefresh(refreshSeq, load);
+  const loadFunds = useCallback(async (refresh: boolean) => {
+    setFundStatus('Reading every small-cap fund’s record, risk, cost and portfolio…');
+    try {
+      setFunds(await fundPicks(refresh));
+      setFundStatus(null);
+    } catch (err) {
+      setFundStatus(`Could not rank funds: ${errText(err)}`);
+    }
+  }, []);
+  useRefresh(refreshSeq, loadFunds);
+
+  // Stocks depend on the amount; wait for typing to settle before rescoring.
+  const budgetRef = useRef(budget);
+  budgetRef.current = budget;
+  const loadGrowth = useCallback(async (refresh: boolean) => {
+    const amount = budgetRef.current;
+    if (amount < 1) return;
+    setGrowthStatus('Scoring the mid and small caps within your amount (the first time after launch can take a minute)…');
+    try {
+      const g = await growthPicks(amount, refresh);
+      if (g.budget === budgetRef.current) setGrowth(g);
+      setGrowthStatus(null);
+    } catch (err) {
+      setGrowthStatus(`Could not rank stocks: ${errText(err)}`);
+    }
+  }, []);
+  useRefresh(refreshSeq, loadGrowth);
+  const firstBudget = useRef(true);
+  useEffect(() => {
+    if (firstBudget.current) {
+      firstBudget.current = false;
+      return;
+    }
+    const t = window.setTimeout(() => void loadGrowth(false), 700);
+    return () => window.clearTimeout(t);
+  }, [budget, loadGrowth]);
 
   const changeBudget = (v: number) => {
     setBudget(v);
@@ -483,22 +523,21 @@ export function FundsView({ refreshSeq }: { refreshSeq: number }) {
     }
   };
 
-  if (!data) return <p className="stocks__note">{status ?? 'Loading…'}</p>;
+  const changeRisk = (r: RiskLevel) => {
+    setRisk(r);
+    void setInvestRisk(r).catch(() => undefined);
+  };
 
-  const fits = data.funds.filter((f) => f.minSip === null || f.minSip <= budget);
-  const hidden = data.funds.length - fits.length;
-  const [first, second] = fits;
-  // Two funds only when each still gets at least its minimum: splitting ₹500
-  // into two ₹250 SIPs buys nothing but paperwork.
-  const split =
-    first && second && budget >= 1000 && budget / 2 >= (first.minSip ?? 0) && budget / 2 >= (second.minSip ?? 0);
+  const fits = funds ? funds.funds.filter((f) => f.minSip === null || f.minSip <= budget) : [];
+  const hidden = funds ? funds.funds.length - fits.length : 0;
+  const plan = funds ? buildPlan(budget, risk, fits, growth) : [];
+  const shown = growth?.divisions.find((d) => d.kind === division);
+  const good = shown ? shown.picks.filter((p) => p.verdict === 'Buy' || p.verdict === 'Accumulate') : [];
 
   return (
     <div className="picks">
-      {status && <p className="stocks__status">{status}</p>}
-
       <div className="fund-budget">
-        <label htmlFor="sip-budget">Monthly SIP</label>
+        <label htmlFor="sip-budget">Monthly amount</label>
         <span className="fund-budget__input">
           ₹
           <input
@@ -510,49 +549,117 @@ export function FundsView({ refreshSeq }: { refreshSeq: number }) {
             onChange={(e) => changeBudget(Math.max(0, Number(e.target.value) || 0))}
           />
         </span>
-        {first && (
-          <p className="fund-budget__plan">
-            {split ? (
-              <>
-                Split it: <strong>₹{whole.format(Math.ceil(budget / 2 / 100) * 100)}</strong> into{' '}
-                <strong>{first.name.replace(/\s+Direct.*$/i, '')}</strong> and the rest into{' '}
-                <strong>{second.name.replace(/\s+Direct.*$/i, '')}</strong>. Two managers with different styles
-                smooth out either one’s bad year.
-              </>
-            ) : (
-              <>
-                Start a <strong>₹{whole.format(budget)}</strong> monthly SIP in{' '}
-                <strong>{first.name.replace(/\s+Direct.*$/i, '')}</strong>. Stay at least 5 to 7 years: small caps
-                can fall 30% or more in a bad year, and the SIP buys more units when they do.
-              </>
-            )}
+        <span className="risk-picker" role="radiogroup" aria-label="Risk level">
+          {(Object.keys(RISK_LABEL) as RiskLevel[]).map((r) => (
+            <button
+              key={r}
+              type="button"
+              role="radio"
+              aria-checked={risk === r}
+              className={`stocks-tab${risk === r ? ' stocks-tab--on' : ''}`}
+              onClick={() => changeRisk(r)}
+            >
+              {RISK_LABEL[r]}
+            </button>
+          ))}
+        </span>
+        <div className="fund-budget__plan">
+          <p>
+            <strong>Your plan for ₹{whole.format(budget)} this month</strong>{' '}
+            <span className="stocks__dim">({SPLITS[risk].note})</span>
           </p>
-        )}
+          {plan.length === 0 ? (
+            <p className="stocks__dim">Loading the plan…</p>
+          ) : (
+            <ol className="plan-lines">
+              {plan.map((l) => (
+                <li key={l.text}>
+                  <strong>₹{whole.format(l.amount)}</strong> · {l.text}
+                  <span className="stocks__dim"> · {l.detail}</span>
+                </li>
+              ))}
+            </ol>
+          )}
+          <p className="stocks__dim">
+            Stay at least 5 to 7 years in the fund. Stock picks are held for their division’s period; sell at the
+            stop-loss rather than hoping.
+          </p>
+          {growth && (growth.ownedSkipped.length > 0 || growth.heavySectors.length > 0) && (
+            <p className="stocks__dim">
+              {growth.ownedSkipped.length > 0 && `Left out because you own them: ${growth.ownedSkipped.join(', ')}. `}
+              {growth.heavySectors.length > 0 &&
+                `Marked down because you already hold a lot of: ${growth.heavySectors.join(', ')}.`}
+            </p>
+          )}
+        </div>
       </div>
 
-      <TrackRecordPanel kind="funds" after={data} />
-      <p className="stocks__rule">
-        Actively managed small-cap funds with 3+ years of history, scored out of 100: track record vs peers 25,
-        risk-adjusted return 20, money flow and size 15, steadiness 10, cost 10, portfolio 10, manager tenure 5,
-        small-ticket 5.
-        {data.gaps.length > 0 && ` Note: ${data.gaps.join('; ')}.`}
-        {hidden > 0 && ` ${hidden} more need a bigger minimum SIP than ₹${whole.format(budget)}.`}
-      </p>
-
-      {fits.length === 0 ? (
-        <p className="stocks__note">No fund starts at this amount. Most begin at ₹100 to ₹500.</p>
-      ) : (
-        <div className="picks__grid">
-          {fits.map((f) => (
-            <FundCard key={f.code} f={f} rank={data.funds.indexOf(f) + 1} />
-          ))}
-        </div>
+      <h2 className="picks__title">Stocks within ₹{whole.format(budget)}</h2>
+      {growthStatus && <p className="stocks__status">{growthStatus}</p>}
+      {growth && (
+        <>
+          <nav className="stocks-tabs" aria-label="Divisions">
+            {growth.divisions.map((d) => (
+              <button
+                key={d.kind}
+                type="button"
+                className={`stocks-tab${d.kind === division ? ' stocks-tab--on' : ''}`}
+                aria-pressed={d.kind === division}
+                onClick={() => setDivision(d.kind)}
+              >
+                {d.label}
+                <span className="stocks-tab__count">
+                  {d.picks.filter((p) => p.verdict === 'Buy' || p.verdict === 'Accumulate').length}
+                </span>
+              </button>
+            ))}
+          </nav>
+          {shown && (
+            <p className="stocks__rule">
+              {shown.blurb} Swings {shown.volLow.toFixed(0)} to {shown.volHigh.toFixed(0)}% a year; {shown.picks.length}{' '}
+              stocks scored out of 100 (weights:{' '}
+              {shown.picks[0]?.factors.map((f) => `${f.name.toLowerCase()} ${f.weight.toFixed(0)}`).join(', ')}). From
+              the Midcap 150 and Smallcap 250: {growth.affordable} of {growth.universe} trade at or under ₹
+              {whole.format(growth.budget)} with at least ₹2 Cr a day changing hands.
+              {growth.gaps.length > 0 && ` Note: ${growth.gaps.join('; ')}.`}
+            </p>
+          )}
+          {good.length === 0 ? (
+            <p className="stocks__note">Nothing in this division clears the bar today. Its share goes to the fund.</p>
+          ) : (
+            <div className="picks__grid">
+              {good.slice(0, 9).map((p) => (
+                <GrowthCard key={p.symbol} p={p} />
+              ))}
+            </div>
+          )}
+        </>
       )}
 
-      {data.tooNew.length > 0 && (
-        <p className="stocks__foot">
-          Not ranked, under 3 years old: {data.tooNew.map((n) => n.replace(/\s+Direct.*$/i, '')).join(', ')}.
-        </p>
+      <h2 className="picks__title">Small-cap mutual funds</h2>
+      {fundStatus && <p className="stocks__status">{fundStatus}</p>}
+      {funds && (
+        <>
+          <p className="stocks__rule">
+            Actively managed small-cap funds with 3+ years of history, scored out of 100: track record vs peers 25,
+            risk-adjusted return 20, money flow and size 15, steadiness 10, cost 10, portfolio 10, manager tenure 5,
+            small-ticket 5.
+            {funds.gaps.length > 0 && ` Note: ${funds.gaps.join('; ')}.`}
+            {hidden > 0 && ` ${hidden} more need a bigger minimum SIP than ₹${whole.format(budget)}.`}
+          </p>
+          {fits.length === 0 ? (
+            <p className="stocks__note">No fund starts at this amount. Most begin at ₹100 to ₹500.</p>
+          ) : (
+            <div className="picks__grid">
+              {fits.map((f) => (
+                <FundCard key={f.code} f={f} rank={funds.funds.indexOf(f) + 1} />
+              ))}
+            </div>
+          )}
+          {funds.tooNew.length > 0 && (
+            <p className="stocks__foot">Not ranked, under 3 years old: {funds.tooNew.map(fundName).join(', ')}.</p>
+          )}
+        </>
       )}
     </div>
   );

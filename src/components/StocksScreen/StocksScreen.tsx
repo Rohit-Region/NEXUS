@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { RefreshCw, TrendingUp } from 'lucide-react';
 import { stockBoard, type StockBoard, type StockRow } from '../../lib/nexus-db';
-import { FundsView, SuggestionsView } from './Picks';
+import { IposView } from './Ipos';
+import { SuitsView, SuggestionsView } from './Picks';
+import { RadarView } from './Radar';
+import { ReportView } from './Report';
 import './StocksScreen.css';
 
 type SortKey = 'changePct' | 'ret1w' | 'ret1m' | 'ret3m' | 'fromHigh';
@@ -76,6 +79,9 @@ const LISTS: List[] = [
 const VIEWS = [
   { id: 'suggestions', label: 'Suggestions' },
   { id: 'funds', label: 'Suits for you' },
+  { id: 'radar', label: 'News radar' },
+  { id: 'ipos', label: 'IPOs' },
+  { id: 'report', label: 'Report' },
 ] as const;
 
 const COLUMNS: { key: SortKey; label: string; title: string }[] = [
@@ -130,8 +136,9 @@ function time(unix: number): string {
 /**
  * Stocks: the Nifty 50 sorted by how it is moving (today's gainers and
  * losers, rising and falling trends, the whole index in one sortable table),
- * plus two advice tabs: scored stock suggestions, and small-cap funds ranked
- * for a small monthly SIP. Every list and score states its rule.
+ * plus advice tabs: scored Nifty 50 suggestions, growth stocks and small-cap
+ * funds for a small monthly amount, and a report of how every past
+ * suggestion turned out. Every list and score states its rule.
  */
 export function StocksScreen() {
   const [board, setBoard] = useState<StockBoard | null>(null);
@@ -277,7 +284,10 @@ export function StocksScreen() {
       </nav>
 
       {view?.id === 'suggestions' && <SuggestionsView refreshSeq={refreshSeq} />}
-      {view?.id === 'funds' && <FundsView refreshSeq={refreshSeq} />}
+      {view?.id === 'funds' && <SuitsView refreshSeq={refreshSeq} />}
+      {view?.id === 'radar' && <RadarView refreshSeq={refreshSeq} />}
+      {view?.id === 'ipos' && <IposView refreshSeq={refreshSeq} />}
+      {view?.id === 'report' && <ReportView refreshSeq={refreshSeq} />}
 
       {!view && <p className="stocks__rule">{list.rule}</p>}
 

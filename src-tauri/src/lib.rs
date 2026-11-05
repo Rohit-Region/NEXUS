@@ -165,6 +165,32 @@ pub fn run() {
                 });
             }
 
+            // ULIP funds: their NAVs are published once a day, in the
+            // evening, so a check every three hours keeps the Portfolio at
+            // most one publication behind. A failure leaves the last NAV.
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(30));
+                    loop {
+                        if let Some(db) = handle.try_state::<DbState>() {
+                            if let Err(e) = commands::portfolio_chat::refresh_ulip_navs(&db) {
+                                log::warn!("ULIP NAV refresh failed: {e}");
+                            }
+                        }
+                        std::thread::sleep(std::time::Duration::from_secs(3 * 60 * 60));
+                    }
+                });
+            }
+
+            // Stocks: price the 400 mid and small caps and fetch their
+            // company data in the background, so the first visit to Suits
+            // for you scores from cache instead of waiting on 800 requests.
+            std::thread::spawn(|| {
+                std::thread::sleep(std::time::Duration::from_secs(15));
+                assistant::growth_picks::warm();
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -258,9 +284,21 @@ pub fn run() {
             commands::stocks::nexus_stock_board,
             commands::stocks::nexus_stock_picks,
             commands::stocks::nexus_fund_picks,
+            commands::stocks::nexus_growth_picks,
+            commands::stocks::nexus_news_radar,
+            commands::stocks::nexus_invest_risk,
+            commands::stocks::nexus_set_invest_risk,
             commands::stocks::nexus_pick_track_record,
+            commands::ipos::nexus_ipo_desk,
+            commands::ipos::nexus_ipo_allotments,
+            commands::ipos::nexus_add_ipo_allotment,
+            commands::ipos::nexus_set_ipo_symbol,
+            commands::ipos::nexus_remove_ipo_allotment,
             commands::portfolio_chat::nexus_portfolio_chat,
             commands::portfolio_chat::nexus_portfolio_chat_apply,
+            commands::portfolio_chat::nexus_ulip_switch_report,
+            commands::portfolio_chat::nexus_ulip_fund_history,
+            commands::portfolio_chat::nexus_policy_plan_save,
             commands::phone_calls::nexus_call_settings,
             commands::phone_calls::nexus_set_call_settings,
             commands::phone_calls::nexus_call_test,
@@ -282,6 +320,7 @@ pub fn run() {
             commands::spending::nexus_spend_review,
             commands::spending::nexus_spend_accept,
             commands::spending::nexus_spend_ignore,
+            commands::spending::nexus_spend_split,
             commands::nexus_set_calendar_enabled,
             commands::nexus_open_url,
             commands::nexus_desktop_notification,
