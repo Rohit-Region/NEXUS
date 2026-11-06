@@ -18,13 +18,20 @@
 //! `LAPolicy::DeviceOwnerAuthentication`: Touch ID, with the Mac login
 //! password offered by macOS itself when Touch ID is unavailable. NEXUS never
 //! sees a fingerprint or the password, only macOS's yes or no.
+//!
+//! Off the Mac there is no way to ask yet, so it stays locked.
 
+#[cfg(target_os = "macos")]
 use std::sync::mpsc;
 use std::sync::Mutex;
+#[cfg(target_os = "macos")]
 use std::time::Duration;
 
+#[cfg(target_os = "macos")]
 use objc2::runtime::Bool;
+#[cfg(target_os = "macos")]
 use objc2_foundation::{NSError, NSString};
+#[cfg(target_os = "macos")]
 use objc2_local_authentication::{LABiometryType, LAContext, LAPolicy};
 
 /// Seconds away before it locks again.
@@ -34,6 +41,7 @@ pub const AWAY: i64 = 300;
 pub const LOCKED: &str = "Spending is locked. Unlock it with Touch ID.";
 
 /// How long to wait for the user to answer the Touch ID prompt.
+#[cfg(target_os = "macos")]
 const PROMPT_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// When Spending was last used while unlocked; `None` is locked.
@@ -81,6 +89,7 @@ pub fn lock() {
 }
 
 /// "touchId" when this Mac can use Touch ID, else "password".
+#[cfg(target_os = "macos")]
 pub fn method() -> &'static str {
     let context = unsafe { LAContext::new() };
     let biometrics = unsafe { context.canEvaluatePolicy_error(LAPolicy::DeviceOwnerAuthenticationWithBiometrics) };
@@ -93,6 +102,7 @@ pub fn method() -> &'static str {
 
 /// Ask macOS to confirm it is the owner: Touch ID, or the login password.
 /// Blocks until answered (or `PROMPT_TIMEOUT`), so call it off the main thread.
+#[cfg(target_os = "macos")]
 pub fn unlock() -> Result<(), String> {
     let context = unsafe { LAContext::new() };
     let policy = LAPolicy::DeviceOwnerAuthentication;
@@ -115,6 +125,16 @@ pub fn unlock() -> Result<(), String> {
         Ok(false) => Err("Not unlocked.".to_string()),
         Err(_) => Err("The Touch ID prompt timed out.".to_string()),
     }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn method() -> &'static str {
+    "biometric"
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn unlock() -> Result<(), String> {
+    Err("Spending cannot be unlocked on this device yet.".to_string())
 }
 
 #[cfg(test)]

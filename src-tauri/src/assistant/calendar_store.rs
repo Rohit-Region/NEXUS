@@ -32,8 +32,11 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
+#[cfg(target_os = "macos")]
 use objc2::rc::Retained;
+#[cfg(target_os = "macos")]
 use objc2_event_kit::{EKAuthorizationStatus, EKEntityType, EKEvent, EKEventStore};
+#[cfg(target_os = "macos")]
 use objc2_foundation::NSDate;
 use serde::Serialize;
 
@@ -58,6 +61,8 @@ pub struct LocalEvent {
 }
 
 /// Whether macOS will let NEXUS read the calendar.
+// Off the Mac only `Restricted` is ever reported.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Access {
@@ -75,6 +80,7 @@ pub enum Access {
 
 impl Access {
     /// What to tell the user, in the terms they can act on.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub fn explain(self) -> &'static str {
         match self {
             Access::Granted => "NEXUS can read your calendar.",
@@ -96,6 +102,7 @@ impl Access {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn classify(status: EKAuthorizationStatus) -> Access {
     // `Authorized` is an alias of `FullAccess` in these bindings, so matching
     // it separately would be an unreachable arm.
@@ -127,6 +134,7 @@ pub fn set_enabled(on: bool) {
 }
 
 /// The current permission, without asking for it.
+#[cfg(target_os = "macos")]
 pub fn access() -> Access {
     classify(unsafe { EKEventStore::authorizationStatusForEntityType(EKEntityType::Event) })
 }
@@ -140,6 +148,7 @@ pub fn access() -> Access {
 /// Calling this when already denied is a no-op as far as the user can see:
 /// macOS prompts once and never again, which is why `Access::Denied` sends
 /// people to System Settings instead of telling them to retry.
+#[cfg(target_os = "macos")]
 pub fn request_access() {
     if !enabled() {
         return;
@@ -163,6 +172,7 @@ pub fn request_access() {
 ///
 /// EventKit gives no ordering guarantee, so this sorts by start. A calendar
 /// card that lists the day out of order is worse than no card.
+#[cfg(target_os = "macos")]
 pub fn events_between(from: i64, to: i64) -> Result<Vec<LocalEvent>, String> {
     if !enabled() {
         return Err(OFF.to_string());
@@ -193,6 +203,7 @@ pub fn events_between(from: i64, to: i64) -> Result<Vec<LocalEvent>, String> {
     Ok(out)
 }
 
+#[cfg(target_os = "macos")]
 fn flatten(event: &Retained<EKEvent>) -> LocalEvent {
     unsafe {
         LocalEvent {
@@ -215,6 +226,24 @@ fn flatten(event: &Retained<EKEvent>) -> LocalEvent {
                 .unwrap_or_default(),
         }
     }
+}
+
+/// What every calendar read says off the Mac.
+#[cfg(not(target_os = "macos"))]
+const MAC_ONLY: &str =
+    "The calendar is read from the Mac's own Calendar app, so it shows in NEXUS on the Mac.";
+
+#[cfg(not(target_os = "macos"))]
+pub fn access() -> Access {
+    Access::Restricted
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn request_access() {}
+
+#[cfg(not(target_os = "macos"))]
+pub fn events_between(_from: i64, _to: i64) -> Result<Vec<LocalEvent>, String> {
+    Err(MAC_ONLY.to_string())
 }
 
 #[cfg(test)]
