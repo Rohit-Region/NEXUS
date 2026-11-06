@@ -4939,6 +4939,9 @@ pub fn nexus_set_keep_awake(enabled: bool) -> Result<bool, String> {
         std::sync::Mutex::new(None);
     let mut guard = KEEP_AWAKE.lock().unwrap_or_else(|e| e.into_inner());
 
+    if enabled && !cfg!(target_os = "macos") {
+        return Err("Keeping the computer awake is a Mac setting.".to_string());
+    }
     if enabled {
         if guard.is_none() {
             let pid = std::process::id().to_string();

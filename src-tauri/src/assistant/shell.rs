@@ -53,8 +53,11 @@ pub enum RunError {
 impl std::fmt::Display for RunError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RunError::NotFound { program } => {
+            RunError::NotFound { program } if cfg!(target_os = "macos") => {
                 write!(f, "{program} is not installed on this Mac.")
+            }
+            RunError::NotFound { program } => {
+                write!(f, "{program} runs only on the Mac, so this works in NEXUS on the Mac.")
             }
             RunError::TimedOut { program, seconds } => write!(
                 f,
@@ -63,6 +66,19 @@ impl std::fmt::Display for RunError {
             ),
             RunError::Failed { detail } => write!(f, "{detail}"),
         }
+    }
+}
+
+/// Every program NEXUS runs is a Mac program, so off the Mac none is started.
+/// A phone has its own `date` or `open`, and running one would be a guess at
+/// what it does.
+fn refuse_off_mac(program: &str) -> Result<(), RunError> {
+    if cfg!(target_os = "macos") {
+        Ok(())
+    } else {
+        Err(RunError::NotFound {
+            program: program.to_string(),
+        })
     }
 }
 
@@ -95,6 +111,7 @@ pub fn run_with_stdin_bytes(
 ) -> Result<Output, RunError> {
     use std::io::Write;
 
+    refuse_off_mac(program)?;
     let mut child = Command::new(program)
         .args(args)
         .stdin(Stdio::piped())
@@ -221,6 +238,7 @@ pub fn run_with_env(
     env: &[(&str, &str)],
     timeout: Duration,
 ) -> Result<Output, RunError> {
+    refuse_off_mac(program)?;
     let mut command = Command::new(program);
     command.args(args);
     for (name, value) in env {
@@ -262,6 +280,7 @@ pub fn run_in_dir(
 ) -> Result<Output, RunError> {
     use std::io::Write;
 
+    refuse_off_mac(program)?;
     let mut command = Command::new(program);
     command.args(args).current_dir(dir);
     for (name, value) in env {
@@ -320,6 +339,20 @@ pub fn osascript(lines: &[&str], args: &[&str]) -> Result<Output, RunError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_program_start_is_refused_off_the_mac_first() {
+        // The phone must never run a binary that only shares a Mac program's
+        // name, so each spawn here sits behind the guard.
+        let production = include_str!("shell.rs")
+            .split_once("#[cfg(test)]")
+            .expect("marker")
+            .0;
+        let spawns = production.matches("Command::new(program)").count();
+        let guards = production.matches("refuse_off_mac(program)?;").count();
+        assert!(spawns > 0);
+        assert_eq!(spawns, guards, "a Command::new without refuse_off_mac before it");
+    }
 
     #[test]
     fn run_in_dir_runs_there_and_feeds_stdin() {

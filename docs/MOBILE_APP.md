@@ -140,15 +140,21 @@ themselves. Four PRs, in order.
 
 ### PR 2: Fence off Mac-only code
 
-- [ ] The Mac-only dependencies (`objc2-*`: EventKit, speech, audio,
-      LocalAuthentication) move under `[target.'cfg(target_os = "macos")']`.
-- [ ] Modules that run Mac programs (`osascript`, `plutil`, `open`,
-      `caffeinate`, `gh`, `claude`) or Mac APIs build only on macOS, with a
-      stub on Android that answers "Mac only". This includes the Amazon
-      restock check in `commands/mod.rs`, which reads Chrome tabs and runs
-      `curl` directly.
-- [ ] The Keychain helpers in `http.rs` build only on macOS.
-- [ ] `cargo build --target aarch64-linux-android` succeeds.
+- [x] The Mac-only dependencies (`objc2-*` and `block2`: EventKit, speech,
+      audio, LocalAuthentication) move under
+      `[target.'cfg(target_os = "macos")']`.
+- [x] Every program NEXUS runs goes through `shell.rs`, and off the Mac it
+      starts none and says "runs only on the Mac". That one guard covers
+      `osascript`, `plutil`, `open`, `gh`, `claude`, the Keychain's
+      `security` and the restock check's `curl`; `caffeinate` is refused
+      the same way. A test fails if a spawn is added without the guard.
+- [x] The calendar reports "Mac only"; voice has an off-Mac stand-in
+      (`voice/off_mac.rs`) that shares the intent, response and wake-word
+      logic and answers "Mac only" for the microphone and speech.
+- [x] Spending stays locked off the Mac until the fingerprint unlock lands
+      (PR 4); the window has a label for it ready.
+- [x] `cargo check --lib --target aarch64-linux-android` succeeds with no
+      warnings.
 
 ### PR 3: Android shell
 

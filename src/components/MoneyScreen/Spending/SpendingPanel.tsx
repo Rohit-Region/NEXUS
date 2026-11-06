@@ -25,6 +25,7 @@ import {
   type ReviewItem,
   type SpendMonth,
   type SpendStatus,
+  type UnlockMethod,
 } from '../../../lib/nexus-db';
 import { SpendCalendar } from './SpendCalendar';
 import { SavingsCard } from './SavingsCard';
@@ -39,6 +40,12 @@ import './Spending.css';
 /** The tab re-reads while open, so payments synced in the background appear
  *  without a press of Sync. */
 const REFRESH_MS = 60_000;
+
+const UNLOCK_LABEL: Record<UnlockMethod, { idle: string; waiting: string }> = {
+  touchId: { idle: 'Unlock with Touch ID', waiting: 'Waiting for Touch ID…' },
+  password: { idle: 'Unlock with your Mac password', waiting: 'Waiting for Touch ID…' },
+  biometric: { idle: 'Unlock with your fingerprint', waiting: 'Waiting for your fingerprint…' },
+};
 const DEFAULT_ACCOUNTS = ['ICICI XX225', 'HDFC card', 'Cash'];
 
 type Editing =
@@ -69,7 +76,7 @@ export function SpendingPanel() {
   const [pasting, setPasting] = useState<string | null>(null);
   // null while checking; the lock is enforced by the backend, this mirrors it.
   const [locked, setLocked] = useState<boolean | null>(null);
-  const [unlockMethod, setUnlockMethod] = useState<'touchId' | 'password'>('touchId');
+  const [unlockMethod, setUnlockMethod] = useState<UnlockMethod>('touchId');
   const [unlocking, setUnlocking] = useState(false);
   const [lockError, setLockError] = useState<string | null>(null);
 
@@ -193,7 +200,7 @@ export function SpendingPanel() {
         </p>
         <button className="spend-lock__btn" type="button" onClick={() => void unlock()} disabled={unlocking}>
           <Fingerprint size={16} strokeWidth={2} aria-hidden="true" />
-          {unlocking ? 'Waiting for Touch ID…' : unlockMethod === 'touchId' ? 'Unlock with Touch ID' : 'Unlock with your Mac password'}
+          {unlocking ? UNLOCK_LABEL[unlockMethod].waiting : UNLOCK_LABEL[unlockMethod].idle}
         </button>
         {lockError && <p className="spend-lock__error">{lockError}</p>}
       </div>

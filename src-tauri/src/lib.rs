@@ -1,6 +1,10 @@
 mod assistant;
 mod commands;
 mod db;
+#[cfg(target_os = "macos")]
+mod voice;
+#[cfg(not(target_os = "macos"))]
+#[path = "voice/off_mac.rs"]
 mod voice;
 
 use assistant::approval::ApprovalStore;

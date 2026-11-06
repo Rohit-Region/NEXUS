@@ -1232,9 +1232,12 @@ export function spendIgnore(smsId: string): Promise<void> {
   return invoke<void>('nexus_spend_ignore', { smsId });
 }
 
+export type UnlockMethod = 'touchId' | 'password' | 'biometric';
+
 export interface SpendLockState {
   open: boolean;
-  method: 'touchId' | 'password';
+  /** 'biometric' is the phone's own fingerprint or face unlock. */
+  method: UnlockMethod;
 }
 
 export function spendLockState(): Promise<SpendLockState> {
