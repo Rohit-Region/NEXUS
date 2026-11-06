@@ -158,9 +158,20 @@ themselves. Four PRs, in order.
 
 ### PR 3: Android shell
 
-- [ ] `tauri android init`; the app id, name and icon.
-- [ ] Internet permission only.
-- [ ] A debug APK installs and opens on the emulator.
+- [x] `tauri android init`, committed under `src-tauri/gen/android`. The
+      phone's app id is `com.nexus.mobile`, set in
+      `tauri.android.conf.json`; the Mac keeps `com.nexus.desktop`, since its
+      data folder and macOS permissions are tied to it. Named NEXUS, with the
+      NEXUS launcher icon.
+- [x] Internet permission only.
+- [x] Release signing reads `src-tauri/gen/android/keystore.properties` when
+      it exists; without it the release APK is unsigned. The keystore and
+      that file are git-ignored.
+- [x] A debug APK installs and opens on the emulator, and creates its own
+      database.
+
+Building needs JDK 17 (the Android Gradle Plugin's version). Android
+Studio's bundled JDK 25 is too new for Gradle 8.14.
 
 ### PR 4: Money screens for a phone
 

@@ -32,3 +32,14 @@ src-tauri/target/
 .env.local
 .env.*.local
 tsconfig.tsbuildinfo
+
+# ── Android signing ───────────────────────────────────────────────────────────
+# The release key and its passwords live outside the repo (Google Drive and
+# Google Password Manager). The repo is public, so never commit them.
+*.jks
+*.keystore
+key.properties
+keystore.properties
+
+# ── Tauri generated schemas (rebuilt on every build) ─────────────────────────
+src-tauri/gen/schemas/
