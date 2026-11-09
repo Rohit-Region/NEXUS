@@ -19,3 +19,7 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+# Called by name from Rust over JNI (assistant/android_secrets.rs), which R8
+# cannot see, so it must not be renamed or removed.
+-keep class com.nexus.mobile.SecretStore { public *; }
+-keep class com.nexus.mobile.BankInbox { public *; }

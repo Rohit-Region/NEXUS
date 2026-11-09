@@ -27,6 +27,7 @@ import {
   type SkillSummary,
   type TopicView,
 } from '../../lib/nexus-db';
+import { IS_PHONE } from '../../lib/platform';
 import './LearnScreen.css';
 
 function errText(err: unknown): string {
@@ -267,7 +268,9 @@ export function LearnScreen() {
         <div className="learn__headings">
           <h1 className="learn__title">Learn</h1>
           <p className="learn__subtitle">
-            Plans, explanations and flashcards from your local model. Nothing leaves this Mac.
+            {IS_PHONE
+              ? 'Plans, explanations and flashcards written by your cloud model (Claude, or Groq as the free backup), with your Me profile, when Settings > Reasoning allows it.'
+              : 'Plans, explanations and flashcards from your local model. Nothing leaves this Mac.'}
           </p>
         </div>
         {stats && (

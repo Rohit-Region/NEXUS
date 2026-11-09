@@ -1,6 +1,8 @@
 pub mod agents;
 pub mod commitments;
 pub mod contacts;
+#[cfg(any(target_os = "android", test))]
+pub mod from_mac;
 pub mod ides;
 pub mod migrations;
 pub mod projects;
@@ -23,6 +25,16 @@ pub struct DbState(pub Mutex<Connection>);
 pub fn init(app: &AppHandle) -> Result<Connection, String> {
     let db_path = resolve_db_path(app)?;
     log::info!("NEXUS database path: {}", db_path.display());
+
+    // The Mac's data, if a copy is waiting, before the database is opened.
+    #[cfg(target_os = "android")]
+    if let Some(dir) = db_path.parent() {
+        match from_mac::take_pending(dir, &db_path) {
+            Ok(true) => log::info!("Took the Mac's data"),
+            Ok(false) => {}
+            Err(e) => log::warn!("{e}"),
+        }
+    }
 
     let conn = Connection::open(&db_path).map_err(|e| format!("Failed to open database: {e}"))?;
 

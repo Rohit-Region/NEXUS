@@ -17,8 +17,9 @@ sync.
   on. A Mac-only feature says "Mac only" rather than spinning.
 - **Sync stays at home.** Phone and Mac talk only on the home Wi-Fi. Nothing
   is exposed to the internet: no cloud relay, no open port, no tunnel.
-- **Secrets never sync.** API keys and tokens are entered on each device and
-  stay on it. They are never written to the sync log or to a log file.
+- **Secrets never sync.** API keys and tokens are never written to the sync
+  log or to a log file. The one way they move is the USB copy below, sealed
+  so that only the phone's Keystore can open them (changed 2026-11-07).
 - **One codebase.** Desktop and mobile build from `main`. There is no
   long-lived mobile branch and no second repo; work lands in short branches,
   one per slice.
@@ -37,11 +38,11 @@ sync.
   release signing key must be backed up: without it, an update cannot be
   installed over the existing app, and the app has to be removed, data
   included, to install a new one.
-- **The phone's assistant costs money.** The Mac runs the model through the
-  Claude CLI and Ollama, and neither runs on a phone, so the phone's assistant
-  uses a Claude API key, which is billed per use.
-- **Until Phase 2, the phone starts empty.** Holdings and policies are entered
-  on the phone, or copied once for testing, until sync exists.
+- **The phone's assistant needs a cloud key.** The Mac runs the model through
+  the Claude CLI and Ollama, and neither runs on a phone. A Claude or OpenAI
+  key is billed per use; a Groq key is free (rate-limited) and is the backup,
+  tried last and whenever the one before it fails.
+- **Until Phase 2, the phone gets the Mac's data by USB** (`mac-to-phone.sh`).
 
 ---
 
@@ -71,11 +72,14 @@ same project; its Android files live in `src-tauri/gen/android/`.
 | Spending, bills, balances                           | Yes                | Yes, behind the fingerprint lock     |
 | Stock picks, IPO desk, news radar, news             | Yes                | Yes                                  |
 | Weather, Today, Me profile                          | Yes                | Yes                                  |
-| Bank SMS                                            | Google Sheet relay | Read on the phone directly (Phase 3) |
+| Bank SMS                                            | Google Sheet relay | Read from the phone's own inbox     |
 | Alerts                                              | ntfy               | Native push (Phase 3)                |
-| Assistant chat                                      | Claude CLI, Ollama | Claude API key (Phase 4)             |
+| Assistant chat                                      | Claude CLI, Ollama | Claude, OpenAI or Groq key           |
+| Learn, resume tailoring, cover letters, news radar  | Ollama (local)     | The same keys, when allowed          |
+| Career search, Me, Settings, Projects list          | Yes                | Yes                                  |
 | Calendar                                            | EventKit           | Mac only for now                     |
-| IDE, agents, Clone, shell                           | Yes                | Mac only                             |
+| IDE, agents, Clone tasks, shell                     | Yes                | Mac only (the screens show)          |
+| Registry of IDEs and agents                         | Yes                | Not on the phone                     |
 | WhatsApp, Teams, Outlook desktop, notifications     | Yes                | Mac only                             |
 | GitHub and Jira (via `gh` and `acli`)               | Yes                | Mac only                             |
 | Voice (speech in and out)                           | Yes                | Mac only                             |
@@ -111,12 +115,27 @@ same project; its Android files live in `src-tauri/gen/android/`.
   Either half alone is useless to whoever finds it. The repo is public, so
   `*.jks`, `*.keystore` and `key.properties` are git-ignored.
 
+- **Secrets on the phone live in its own store, encrypted by the Android
+  Keystore** (`SecretStore.kt`, reached from Rust over JNI by
+  `android_secrets.rs`). The Keychain's three functions in `http.rs` have
+  Android versions, so every secret-holding feature works unchanged: the
+  Claude key, Jira, GitHub. No new dependency. Chosen over
+  `tauri-plugin-stronghold` 2026-11-07.
+- **The phone writes with Claude where the Mac uses Ollama** (`writer.rs`):
+  Learn, resume tailoring, cover letters, interview practice and the news
+  radar. Only with both Reasoning switches on, since each prompt carries the
+  user's profile, resume or holdings, and each call is audited. The Mac keeps
+  its local model and its "nothing leaves this Mac" promise. Chosen
+  2026-11-07.
+- **Every screen except the Registry is on the phone**, behind five tabs:
+  Home, Money, Stocks, Ask, and More for the rest. Settings that only
+  configure the Mac (voice, Mac access, wellbeing nudges, ntfy calls and
+  approvals) are hidden there. Chosen 2026-11-07.
+
 ## Open questions
 
-- [ ] **Where secrets live on the phone.** The Mac keeps tokens in the
-      Keychain through `/usr/bin/security`, which Android does not have. The
-      likely answer is the Android Keystore; needed before Phase 4, since
-      Phase 1 to 3 use no credentials.
+- [x] **Where secrets live on the phone.** The Android Keystore (see
+      Decisions).
 
 ---
 
@@ -173,41 +192,140 @@ themselves. Four PRs, in order.
 Building needs JDK 17 (the Android Gradle Plugin's version). Android
 Studio's bundled JDK 25 is too new for Gradle 8.14.
 
-### PR 4: Money screens for a phone
+### PR 4: NEXUS on the phone
 
-- [ ] A phone layout: bottom tabs, touch-sized controls, a single column.
-- [ ] Portfolio, policies (the PNB and Tata reports) and stocks work on the
-      phone with its own database.
-- [ ] Spending opens only after the fingerprint check.
-- [ ] Prices and NAVs refresh when the app opens (background refresh is Phase 3).
+- [x] A phone shell (`PhoneShell`) around the same `Dashboard` as the Mac:
+      Home, Money, Stocks and Ask as tabs at the bottom, the rest under More.
+      Chosen by the WebView's user agent (`lib/platform.ts`), so the Mac's
+      shell is unchanged.
+- [x] The page stays clear of the status bar, the gesture bar, a camera
+      cutout and the keyboard (`MainActivity.kt`); the bars are NEXUS black
+      with light icons.
+- [x] Phone layout rules live at the end of each screen's own stylesheet,
+      scoped under `.phone-shell`, so none can reach the Mac: holdings on two
+      lines, section tabs that scroll sideways, forms that wrap, 40px and
+      larger touch targets, and the stock table's names pinned while it
+      scrolls sideways.
+- [x] Portfolio, the PNB and Tata fund reports, goals, retirement, bills and
+      stocks work on the phone with its own database, fetching over its own
+      HTTPS client. A chart no longer swallows the swipe that scrolls past it.
+- [x] Spending opens only after the phone's fingerprint, face or PIN, through
+      `tauri-plugin-biometric` 2.3 (the newest for this Tauri; Android only,
+      one crate). Locked again after 5 minutes away and on every restart.
+- [x] The phone's secret store (see Decisions): a stored key survives a
+      restart.
+- [x] Spending reads ICICI and HDFC texts straight from the phone's inbox
+      (`BankInbox.kt`, `android_sms.rs`), once the user allows it, in place
+      of the Sheet and its key. Same sender rule and OTP exclusion as the
+      script, and the script's id for each text, so one that also came in
+      through the Sheet is booked once. The first read takes the whole
+      inbox.
+- [x] Groq as a third, free provider, tried after Claude and OpenAI. A
+      provider that fails (no credit, rate limit, outage) hands over to the
+      next, on the Mac and the phone; each attempt is audited. The default
+      model is `openai/gpt-oss-120b`, with short reasoning so the reply fits
+      the token limit.
+- [x] The assistant on the phone, with a Claude or OpenAI key entered in
+      Settings > Reasoning (the Mac can now enter one there too, instead of
+      in Terminal). A reply it cannot give is shown, not only spoken.
+- [x] Learn, Career, News, Me, Projects, Clone and Settings on the phone;
+      the parts that need the Mac say so or are hidden.
+- [x] Home is the same command centre as the Mac's, in one column with the
+      core first, shown even before the phone has a project. The schedule,
+      pull requests, standup, service versions and stock watch stay on the
+      Mac. A reminder coming due opens the assistant with it written out,
+      while the app is open (alerts with the app closed are Phase 3). Kai
+      Connect stays on the Mac.
+- [x] `scripts/mac-to-phone.sh` copies the Mac's data over USB until sync
+      exists: a consistent snapshot of the whole database (holdings,
+      spending and its categories, plans, settings, permissions, profile),
+      which the phone puts in place of its own at start (`db/from_mac.rs`).
+      The Mac is the master copy until Phase 2: what was entered only on the
+      phone is replaced, so changes are made on the Mac and the script run
+      again. The phone then re-reads its inbox; texts the Mac already has
+      from the Sheet carry the same id and are booked once.
+- [x] The same script sends the keys (Jira, GitHub, Claude, OpenAI),
+      sealed: the phone publishes the public half of an RSA key held
+      in its Android Keystore, the Mac pipes each secret from the Keychain
+      straight into encryption with it, and the phone opens them into its
+      secure storage (`MacTransfer.kt`). No secret is in the clear on either
+      disk, on the cable, or in a command line. Microsoft sign-ins are left
+      out: they are sessions, and only Mac features use them. Jira and
+      GitHub tokens go to the phone, rather than only their results, so
+      Assigned to Me is live away from home (decided 2026-11-07).
+- [x] Jira's API token can be entered in Settings (it was a Terminal command
+      before). On the phone, a refused token is reported as such: the
+      fallback through a Jira tab needs the Mac's Chrome.
+- [x] Prices refresh when the app opens, and again when it comes back after
+      5 minutes or more away (background refresh is Phase 3).
 - [ ] Installed and checked on the real phone.
 
 ## Phase 2: Home Wi-Fi sync
 
-- [ ] **Pairing:** the Mac shows a QR code; the phone scans it once. The code
-      carries the Mac's address and a shared key, so only the paired phone is
-      answered.
-- [ ] **Finding each other:** the phone looks for the Mac only on the home
-      network.
-- [ ] **Change log:** each device records its edits; a sync exchanges what
-      the other has not seen.
-- [ ] **Conflicts:** for user data (holdings, policies, plans, settings), the
-      newest edit wins, field by field.
-- [ ] **Logs are merged, not overwritten:** the ULIP NAV log, bank SMS and the
-      pick journal keep every entry from both sides.
-- [ ] **Not synced:** caches (they refetch) and secrets (never).
-- [ ] A "Last synced" line on both devices.
+One PR, branched after PR 4 (chosen 2026-11-10). The USB copy
+(`mac-to-phone.sh`) keeps one job: setting up a phone the first time. After
+that, only changes travel.
+
+Decisions (2026-11-10):
+
+- **Encryption uses each system's own crypto, no new crates:** Android's
+  `javax.crypto` over JNI (as `SecretStore.kt` already does) and the Mac's
+  CommonCrypto through a few hand-written bindings. Both sides must produce
+  byte-identical results, so a shared set of test vectors checks them.
+- **Pairing works both ways:** the pairing key travels sealed in the USB copy,
+  or the Mac shows a QR code the phone scans. Scanning needs the camera
+  permission and a scanner; which one (a plugin or Android's own) is an open
+  dependency question to settle before it is built.
+- **The audit logs merge both ways,** so the Mac's Reasoning page shows what
+  the phone sent to a cloud model, and the reverse.
+
+Work:
+
+- [ ] **No clashing row numbers:** the phone numbers its new rows from
+      1,000,000,000 up; the Mac keeps the low range. Links between rows
+      (an expense and its shares) keep working.
+- [ ] **Change log:** triggers record every insert, update and delete in a
+      synced table, with the device and a clock reading.
+- [ ] **Conflicts:** for user data (holdings, goals, policies, budgets, payee
+      rules, expense categories, profile, Learn, Career), the newest edit
+      wins, field by field. Deletes are kept as markers so they travel too.
+- [ ] **Logs are merged, not overwritten:** the ULIP NAV log, bank texts, the
+      pick journal and the audit logs keep every entry from both sides.
+- [ ] **One payment, once:** an expense booked from the same bank text on
+      both devices has two row numbers but one `sms_id`; sync matches on it.
+- [ ] **Not synced:** caches (they refetch), settings that belong to one
+      device (voice, the inbox cursor, model choices, ntfy), the Registry,
+      IDEs and agents, and secrets (never).
+- [ ] **Same version on both:** sync refuses when the database versions
+      differ and says which device to update.
+- [ ] **The Mac listens** while NEXUS is open and answers only the paired
+      phone; the phone starts every sync, since Android cannot reliably wait
+      for connections in the background.
+- [ ] **Finding each other:** the phone asks the home network where NEXUS
+      is and the Mac replies, so a changed address breaks nothing. "Home" is
+      wherever the paired Mac answers: no Wi-Fi name check, which would need
+      Android's location permission.
+- [ ] **Encrypted and signed** with the pairing key, both directions.
+- [ ] **Pairing** through the USB copy, and by QR code.
+- [ ] **When:** on opening the app, on coming back to it, every few minutes
+      while it is open, and from a "Sync now" button.
+- [ ] **Outlook and Teams** reach the phone as results: the Mac, which is
+      signed in, sends the calendar and messages, so the phone never signs
+      in to Microsoft. Fresh as of the last sync (decided 2026-11-07).
+- [ ] A "Last synced" line on both devices, and a plain reason when a sync
+      fails ("Mac not found", "update NEXUS on the phone").
 
 ## Phase 3: Phone powers
 
-- [ ] **Bank SMS** read on the phone directly, replacing the Google Sheet
-      relay.
+- [x] **Bank SMS** read on the phone directly, replacing the Google Sheet
+      relay (PR 4).
 - [ ] **Push notifications** replacing ntfy.
 - [ ] **Background refresh** of prices and NAVs while the app is closed.
 - [ ] **Fingerprint** for anything else that is locked on the Mac.
 
 ## Phase 4: Everything else
 
-- [ ] **Assistant chat** on the phone with a Claude API key.
-- [ ] News, career and the remaining screens laid out for a phone.
-- [ ] "Mac only" screens that explain what they need and where to find it.
+- [x] **Assistant chat** on the phone with a Claude API key (PR 4).
+- [x] News, career and the remaining screens laid out for a phone (PR 4).
+- [x] "Mac only" screens that explain what they need and where to find it
+      (PR 4).

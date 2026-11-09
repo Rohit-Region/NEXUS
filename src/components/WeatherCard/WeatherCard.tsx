@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { CloudSun, RefreshCw } from 'lucide-react';
-import { runAction } from '../../lib/assistant';
+import { runAction, isActionError, describeActionError } from '../../lib/assistant';
 import './WeatherCard.css';
 
 interface Reading {
@@ -37,7 +37,7 @@ export function WeatherCard() {
       setReading(output);
       setError(null);
     } catch (err) {
-      setError(String(err));
+      setError(isActionError(err) ? describeActionError(err) : String(err));
     } finally {
       setBusy(false);
     }

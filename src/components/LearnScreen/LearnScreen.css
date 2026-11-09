@@ -521,3 +521,13 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ── On the phone ─────────────────────────────────────────────────────── */
+/* The streak and review count drop below the title instead of squeezing it. */
+.phone-shell .learn__head {
+  flex-wrap: wrap;
+}
+
+.phone-shell .learn__headings {
+  flex: 1 1 70%;
+}

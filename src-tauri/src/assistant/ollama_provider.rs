@@ -366,7 +366,7 @@ pub fn base_url_is_loopback() -> bool {
 /// flashcards", a model under that prompt answers with a JSON plan of invented
 /// action ids, which NEXUS then correctly refuses. Content gets its own prompt
 /// and comes back as plain text.
-const WRITER_PROMPT: &str = "\
+pub(crate) const WRITER_PROMPT: &str = "\
 You are a patient, accurate tutor inside NEXUS, a personal assistant. \
 Write exactly what is asked, as plain text. No JSON, no preamble such as \
 'Here is', no closing remarks. If you are not sure a fact is correct, say so \
@@ -374,6 +374,7 @@ rather than guessing.";
 
 /// The configured local model's name, read once so a caller can release the
 /// database before the (slow) generation call.
+#[cfg_attr(target_os = "android", allow(dead_code))]
 pub fn local_model(conn: &Connection) -> String {
     model_name(conn)
 }
@@ -384,6 +385,7 @@ pub fn local_model(conn: &Connection) -> String {
 /// external-reasoning permission. No actions can come of it; the result is text
 /// for the user to read. Takes the model name rather than a connection so no
 /// caller can hold the database lock across the call.
+#[cfg_attr(target_os = "android", allow(dead_code))]
 pub fn generate_text(model: &str, prompt: &str) -> Result<String, String> {
     // An explicit context window. Ollama's default is small, and when a prompt
     // overflows it the start is silently discarded, which for a resume plus a

@@ -74,6 +74,18 @@ export interface ActionRequest {
   approval?: number;
 }
 
+/**
+ * A step a reasoning model suggested, already checked against the action
+ * registry. Nothing has run: doing it goes through the gate like any action.
+ */
+export interface ProposedStep {
+  actionId: string;
+  input: unknown;
+  /** The gate's own wording, so the button says what approval will ask. */
+  summary: string;
+  requiresConfirmation: boolean;
+}
+
 export interface ActionOutcome {
   actionId: string;
   output: unknown;
@@ -275,6 +287,7 @@ export type AssistantReply =
   | { kind: 'answer'; text: string; cited: string[] }
   | { kind: 'action'; commandId: string; summary: string; input?: unknown }
   | { kind: 'choices'; candidates: Choice[] }
+  | { kind: 'proposal'; steps: ProposedStep[]; rationale: string }
   | {
       kind: 'unresolved';
       reason: string;

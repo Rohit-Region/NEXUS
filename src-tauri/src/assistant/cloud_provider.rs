@@ -1,6 +1,6 @@
 //! NEXUS-022b: cloud reasoning providers.
 //!
-//! Claude and ChatGPT behind the same trait NEXUS-022a's local model
+//! Claude, ChatGPT and Groq behind the same trait NEXUS-022a's local model
 //! implements. Nothing about the bridge changes; only the provider does,
 //! which is the entire point of having the abstraction.
 //!
@@ -15,9 +15,8 @@
 //! 3. **Every call is audited** with the categories that travelled, so the
 //!    trail can answer "why did NEXUS contact an external service".
 //!
-//! Both providers are configured but unavailable until a key exists, and a
+//! Each provider is configured but unavailable until a key exists, and a
 //! provider without a key is not listed at all rather than listed-and-broken.
-//! Neither has been called: no key is stored on this machine.
 
 use rusqlite::Connection;
 
@@ -32,11 +31,14 @@ pub const KEYCHAIN_SERVICE: &str = "nexus-reasoning";
 
 const ANTHROPIC_URL: &str = "https://api.anthropic.com/v1/messages";
 const OPENAI_URL: &str = "https://api.openai.com/v1/chat/completions";
+/// Groq serves open models through OpenAI's request shape, with a free tier.
+const GROQ_URL: &str = "https://api.groq.com/openai/v1/chat/completions";
 /// Pinned rather than tracking "latest": a silent model change alters
 /// behaviour under the user, and the model is recorded in the audit trail.
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const DEFAULT_ANTHROPIC_MODEL: &str = "claude-sonnet-4-5";
 const DEFAULT_OPENAI_MODEL: &str = "gpt-4o-mini";
+const DEFAULT_GROQ_MODEL: &str = "openai/gpt-oss-120b";
 /// Bounded so a prompt cannot grow without limit, and so a runaway reply
 /// cannot become a bill.
 const MAX_OUTPUT_TOKENS: u32 = 1_024;
@@ -61,13 +63,19 @@ Rules:
 pub enum Vendor {
     Anthropic,
     OpenAi,
+    Groq,
 }
+
+/// Every vendor, in the order they are tried: Groq last, as the free backup
+/// for when neither paid key is set or the first that is fails.
+const VENDORS: [Vendor; 3] = [Vendor::Anthropic, Vendor::OpenAi, Vendor::Groq];
 
 impl Vendor {
     pub fn id(self) -> &'static str {
         match self {
             Vendor::Anthropic => "anthropic",
             Vendor::OpenAi => "openai",
+            Vendor::Groq => "groq",
         }
     }
 
@@ -75,6 +83,7 @@ impl Vendor {
         match self {
             Vendor::Anthropic => DEFAULT_ANTHROPIC_MODEL,
             Vendor::OpenAi => DEFAULT_OPENAI_MODEL,
+            Vendor::Groq => DEFAULT_GROQ_MODEL,
         }
     }
 
@@ -82,6 +91,7 @@ impl Vendor {
         match self {
             Vendor::Anthropic => "ai_anthropic_model",
             Vendor::OpenAi => "ai_openai_model",
+            Vendor::Groq => "ai_groq_model",
         }
     }
 
@@ -89,6 +99,7 @@ impl Vendor {
         match self {
             Vendor::Anthropic => ANTHROPIC_URL,
             Vendor::OpenAi => OPENAI_URL,
+            Vendor::Groq => GROQ_URL,
         }
     }
 }
@@ -184,15 +195,36 @@ impl ReasoningProvider for CloudProvider {
         purpose: Purpose,
         context: &AiContext,
     ) -> Result<Reasoning, ReasoningUnavailable> {
-        let key = self.key().ok_or(ReasoningUnavailable::NoProvider)?;
         let prompt = format!("Purpose: {}\n\n{}", purpose.as_str(), render(context));
+        self.complete(SYSTEM_PROMPT, &prompt, 0.1).map(|content| interpret(&content))
+    }
+}
+
+impl CloudProvider {
+    /// Text for the user to read, under the given instructions. Used where
+    /// the Mac would ask its local model and the phone has none
+    /// (`writer::Writer`).
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    pub fn write(&self, system: &str, prompt: &str) -> Result<String, String> {
+        self.complete(system, prompt, 0.3).map_err(|e| e.to_string())
+    }
+
+    /// One exchange with the vendor: `system` as the instructions, `prompt`
+    /// as the user's turn, the reply's text back.
+    fn complete(
+        &self,
+        system: &str,
+        prompt: &str,
+        temperature: f64,
+    ) -> Result<String, ReasoningUnavailable> {
+        let key = self.key().ok_or(ReasoningUnavailable::NoProvider)?;
 
         let (body, headers) = match self.vendor {
             Vendor::Anthropic => (
                 serde_json::json!({
                     "model": self.model,
                     "max_tokens": MAX_OUTPUT_TOKENS,
-                    "system": SYSTEM_PROMPT,
+                    "system": system,
                     "messages": [{ "role": "user", "content": prompt }]
                 }),
                 vec![
@@ -204,16 +236,25 @@ impl ReasoningProvider for CloudProvider {
                     ("x-api-key".to_string(), key),
                 ],
             ),
-            Vendor::OpenAi => (
-                serde_json::json!({
-                    "model": self.model,
-                    "max_tokens": MAX_OUTPUT_TOKENS,
-                    "temperature": 0.1,
-                    "messages": [
-                        { "role": "system", "content": SYSTEM_PROMPT },
-                        { "role": "user", "content": prompt }
-                    ]
-                }),
+            Vendor::OpenAi | Vendor::Groq => (
+                {
+                    let mut body = serde_json::json!({
+                        "model": self.model,
+                        "max_tokens": MAX_OUTPUT_TOKENS,
+                        "temperature": temperature,
+                        "messages": [
+                            { "role": "system", "content": system },
+                            { "role": "user", "content": prompt }
+                        ]
+                    });
+                    // Groq's default model reasons before it replies, and
+                    // that thinking counts against the same token limit;
+                    // kept short so the reply is not cut off.
+                    if self.vendor == Vendor::Groq {
+                        body["reasoning_effort"] = "low".into();
+                    }
+                    body
+                },
                 vec![
                     ("Content-Type".to_string(), "application/json".to_string()),
                     ("Authorization".to_string(), format!("Bearer {key}")),
@@ -239,7 +280,7 @@ impl ReasoningProvider for CloudProvider {
             return Err(ReasoningUnavailable::Unreachable {
                 detail: match response.status {
                     401 | 403 => format!(
-                        "{} rejected the API key. Check the one stored in the Keychain.",
+                        "{} rejected the API key. Check the one stored in {KEY_STORE}.",
                         self.vendor.id()
                     ),
                     429 => "The provider is rate limiting NEXUS. Try again shortly.".to_string(),
@@ -254,9 +295,9 @@ impl ReasoningProvider for CloudProvider {
             }
         })?;
 
-        // Two shapes, one meaning. Both end at `interpret`, which is where
-        // the safe-direction rule lives: anything unrecognisable becomes an
-        // answer, never a plan.
+        // Two shapes, one meaning. A plan then goes to `interpret`, which is
+        // where the safe-direction rule lives: anything unrecognisable becomes
+        // an answer, never a plan.
         let content = match self.vendor {
             Vendor::Anthropic => value
                 .get("content")
@@ -264,7 +305,7 @@ impl ReasoningProvider for CloudProvider {
                 .and_then(|items| items.first())
                 .and_then(|item| item.get("text"))
                 .and_then(|t| t.as_str()),
-            Vendor::OpenAi => value
+            Vendor::OpenAi | Vendor::Groq => value
                 .get("choices")
                 .and_then(|c| c.as_array())
                 .and_then(|items| items.first())
@@ -276,31 +317,41 @@ impl ReasoningProvider for CloudProvider {
             detail: "The provider returned no content.".to_string(),
         })?;
 
-        Ok(interpret(content))
+        Ok(content.to_string())
     }
 }
 
-/// Cloud providers that have a key stored.
+#[cfg(not(target_os = "android"))]
+const KEY_STORE: &str = "the Keychain";
+#[cfg(target_os = "android")]
+const KEY_STORE: &str = "Settings";
+
+/// Cloud providers that have a key stored, in the order they are tried.
 ///
 /// A provider without one is not listed at all. Listing it as unavailable
 /// would put a broken option in front of the user for no benefit; the
 /// Settings screen offers configuration separately.
-pub fn configured(conn: &Connection) -> Vec<Box<dyn ReasoningProvider>> {
-    [Vendor::Anthropic, Vendor::OpenAi]
+pub fn with_keys(conn: &Connection) -> Vec<CloudProvider> {
+    VENDORS
         .into_iter()
         .filter(|vendor| keychain_secret(KEYCHAIN_SERVICE, vendor.id()).is_some())
-        .map(|vendor| {
-            Box::new(CloudProvider {
-                model: model_for(conn, vendor),
-                vendor,
-            }) as Box<dyn ReasoningProvider>
+        .map(|vendor| CloudProvider {
+            model: model_for(conn, vendor),
+            vendor,
         })
+        .collect()
+}
+
+pub fn configured(conn: &Connection) -> Vec<Box<dyn ReasoningProvider>> {
+    with_keys(conn)
+        .into_iter()
+        .map(|provider| Box::new(provider) as Box<dyn ReasoningProvider>)
         .collect()
 }
 
 /// What the Settings screen shows: every vendor, and whether it is set up.
 pub fn describe(conn: &Connection) -> Vec<serde_json::Value> {
-    [Vendor::Anthropic, Vendor::OpenAi]
+    VENDORS
         .into_iter()
         .map(|vendor| {
             serde_json::json!({
@@ -332,7 +383,7 @@ mod tests {
     #[test]
     fn a_cloud_provider_always_leaves_the_machine() {
         // Which is what subjects it to the external-reasoning switch.
-        for vendor in [Vendor::Anthropic, Vendor::OpenAi] {
+        for vendor in VENDORS {
             let provider = CloudProvider {
                 vendor,
                 model: "x".to_string(),
@@ -355,7 +406,7 @@ mod tests {
     fn every_vendor_is_still_described_so_it_can_be_set_up() {
         let conn = test_conn();
         let described = describe(&conn);
-        assert_eq!(described.len(), 2);
+        assert_eq!(described.len(), VENDORS.len());
         for entry in described {
             assert_eq!(entry["configured"], false);
             assert!(entry["keychainHint"]
@@ -430,7 +481,7 @@ mod tests {
             .expect("marker");
         assert!(production.contains("use super::ollama_provider::interpret"));
         assert_eq!(
-            production.matches("interpret(content)").count(),
+            production.matches("interpret(&content)").count(),
             1,
             "a second parser would be a second place for prose to become a plan"
         );
@@ -442,7 +493,13 @@ mod tests {
         // audit trail records which model answered.
         assert!(!DEFAULT_ANTHROPIC_MODEL.contains("latest"));
         assert!(!DEFAULT_OPENAI_MODEL.contains("latest"));
+        assert!(!DEFAULT_GROQ_MODEL.contains("latest"));
         assert!(ANTHROPIC_VERSION.starts_with("20"));
+    }
+
+    #[test]
+    fn groq_is_tried_last() {
+        assert_eq!(VENDORS.last(), Some(&Vendor::Groq), "the free one is the backup");
     }
 
     #[test]
@@ -452,7 +509,7 @@ mod tests {
 
     #[test]
     fn both_endpoints_are_https() {
-        for url in [ANTHROPIC_URL, OPENAI_URL] {
+        for url in [ANTHROPIC_URL, OPENAI_URL, GROQ_URL] {
             assert!(url.starts_with("https://"), "{url}");
         }
     }

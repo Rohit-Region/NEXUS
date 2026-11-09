@@ -13,7 +13,9 @@ use tauri::State;
 use super::{put_setting, setting};
 use crate::assistant::bank_sms;
 use crate::assistant::spend_lock;
-use crate::assistant::http::{forget_keychain_secret, keychain_secret, store_keychain_secret};
+use crate::assistant::http::{forget_keychain_secret, store_keychain_secret};
+#[cfg(not(target_os = "android"))]
+use crate::assistant::http::keychain_secret;
 use crate::assistant::spend::{
     self, guess_category, guess_kind, kind_for_category, payee_key, read_sms, Expense, Kind,
     MonthView, Outcome, Reading,
@@ -24,6 +26,9 @@ const KEYCHAIN_SERVICE: &str = "nexus-bank-sms";
 const KEYCHAIN_ACCOUNT: &str = "key";
 const URL_KEY: &str = "bank_sms_url";
 const CURSOR_KEY: &str = "bank_sms_cursor";
+/// The phone's inbox row the last read reached.
+#[cfg(target_os = "android")]
+const INBOX_CURSOR_KEY: &str = "bank_sms_inbox_cursor";
 const LAST_SYNC_KEY: &str = "bank_sms_last_sync";
 const LAST_ERROR_KEY: &str = "bank_sms_last_error";
 const USUAL_INCOME_KEY: &str = "spend_usual_income_paise";
@@ -70,10 +75,10 @@ pub fn nexus_spend_lock_state() -> LockState {
     LockState { open: spend_lock::is_open(), method: spend_lock::method() }
 }
 
-/// Show the Touch ID prompt; waits for the answer.
+/// Show the Touch ID (or the phone's fingerprint) prompt; waits for the answer.
 #[tauri::command(async)]
-pub fn nexus_spend_unlock() -> Result<(), String> {
-    spend_lock::unlock()
+pub fn nexus_spend_unlock(app: tauri::AppHandle) -> Result<(), String> {
+    spend_lock::unlock(&app)
 }
 
 #[tauri::command(async)]
@@ -93,6 +98,10 @@ pub struct SpendStatus {
 }
 
 fn status(conn: &rusqlite::Connection) -> SpendStatus {
+    // The phone reads its own inbox; there is no link to connect.
+    #[cfg(target_os = "android")]
+    let connected = crate::assistant::android_sms::allowed();
+    #[cfg(not(target_os = "android"))]
     let connected = setting(conn, URL_KEY).is_some()
         && keychain_secret(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT).is_some();
     SpendStatus {
@@ -147,6 +156,17 @@ pub fn nexus_spend_connect(state: State<'_, DbState>, link: String) -> Result<Sp
     Ok(status(&conn))
 }
 
+/// On the phone: ask to read its texts. Returns before the user answers;
+/// the tab checks the status again when NEXUS is back in front.
+#[tauri::command(async)]
+pub fn nexus_spend_read_inbox() -> Result<(), String> {
+    spend_lock::check()?;
+    #[cfg(target_os = "android")]
+    return crate::assistant::android_sms::ask();
+    #[cfg(not(target_os = "android"))]
+    Err("Only the phone reads bank texts from its own inbox.".to_string())
+}
+
 #[tauri::command(async)]
 pub fn nexus_spend_disconnect(state: State<'_, DbState>) -> Result<SpendStatus, String> {
     spend_lock::check()?;
@@ -166,25 +186,11 @@ pub struct SyncReport {
     pub ignored: u32,
 }
 
-/// Fetch new rows from the Sheet and book them. The error, if any, is also
+/// Fetch new bank messages and book them. The error, if any, is also
 /// remembered so the tab can show why the last automatic sync failed.
 pub fn sync_once(state: &DbState) -> Result<SyncReport, String> {
     let _one_at_a_time = SYNCING.lock().unwrap_or_else(|e| e.into_inner());
-    let (base, cursor) = {
-        let conn = lock(state)?;
-        if setting(&conn, URL_KEY).is_none() {
-            if let Some(link) = link_from_setup_file() {
-                let _ = connect(&conn, &link);
-            }
-        }
-        let base = setting(&conn, URL_KEY).ok_or("Bank SMS is not connected yet.")?;
-        let cursor: i64 = setting(&conn, CURSOR_KEY).and_then(|v| v.parse().ok()).unwrap_or(1);
-        (base, cursor)
-    };
-    let key = keychain_secret(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
-        .ok_or("The bank SMS key is missing from the Keychain. Connect the link again.")?;
-
-    let fetched = bank_sms::fetch(&base, &key, cursor);
+    let (cursor_key, cursor, fetched) = fetch_new(state)?;
 
     let conn = lock(state)?;
     let (last, rows) = match fetched {
@@ -200,10 +206,58 @@ pub fn sync_once(state: &DbState) -> Result<SyncReport, String> {
     }
     reread_set_aside(&conn, &mut report)?;
     repair_card_accounts(&conn)?;
-    put_setting(&conn, CURSOR_KEY, &last.max(cursor).to_string())?;
+    put_setting(&conn, cursor_key, &last.max(cursor).to_string())?;
     put_setting(&conn, LAST_SYNC_KEY, &now_unix().to_string())?;
     put_setting(&conn, LAST_ERROR_KEY, "")?;
     Ok(report)
+}
+
+type Fetched = (&'static str, i64, Result<(i64, Vec<bank_sms::Row>), String>);
+
+/// New rows from the Sheet: which cursor they advance, where it stood, and
+/// the rows. The lock is released before the network call.
+#[cfg(not(target_os = "android"))]
+fn fetch_new(state: &DbState) -> Result<Fetched, String> {
+    let (base, cursor) = {
+        let conn = lock(state)?;
+        if setting(&conn, URL_KEY).is_none() {
+            if let Some(link) = link_from_setup_file() {
+                let _ = connect(&conn, &link);
+            }
+        }
+        let base = setting(&conn, URL_KEY).ok_or("Bank SMS is not connected yet.")?;
+        let cursor: i64 = setting(&conn, CURSOR_KEY).and_then(|v| v.parse().ok()).unwrap_or(1);
+        (base, cursor)
+    };
+    let key = keychain_secret(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
+        .ok_or("The bank SMS key is missing from the Keychain. Connect the link again.")?;
+    Ok((CURSOR_KEY, cursor, bank_sms::fetch(&base, &key, cursor)))
+}
+
+/// On the phone the texts are read from its own inbox, which has its own row
+/// numbers. The first read pages through the whole inbox.
+#[cfg(target_os = "android")]
+fn fetch_new(state: &DbState) -> Result<Fetched, String> {
+    use crate::assistant::android_sms;
+    if !android_sms::allowed() {
+        return Err("NEXUS is not allowed to read this phone's texts yet.".to_string());
+    }
+    let cursor: i64 = {
+        let conn = lock(state)?;
+        setting(&conn, INBOX_CURSOR_KEY).and_then(|v| v.parse().ok()).unwrap_or(0)
+    };
+    let read = || -> Result<(i64, Vec<bank_sms::Row>), String> {
+        let (mut last, mut rows) = (cursor, Vec::new());
+        loop {
+            let (next, page) = android_sms::after(last)?;
+            rows.extend(page);
+            if next <= last {
+                return Ok((last, rows));
+            }
+            last = next;
+        }
+    };
+    Ok((INBOX_CURSOR_KEY, cursor, read()))
 }
 
 fn book_row(

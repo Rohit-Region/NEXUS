@@ -114,7 +114,14 @@ const CONFIG_FIELDS: Record<
       key: 'email',
       label: 'Account email',
       placeholder: 'you@company.com',
-      hint: 'Only needed to read issues and comments, which also needs an API token in the Keychain.',
+      hint: 'Only needed to read issues and comments, which also needs the API token below.',
+    },
+    {
+      key: 'token',
+      label: 'API token',
+      placeholder: 'ATATT...',
+      hint: 'From id.atlassian.com > Security > API tokens, for the email above. Kept in the Keychain (on the phone, its secure storage), never in the database.',
+      secret: true,
     },
   ],
 };

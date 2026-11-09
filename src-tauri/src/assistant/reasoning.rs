@@ -382,19 +382,28 @@ pub fn providers(conn: &Connection) -> Vec<Box<dyn ReasoningProvider>> {
 pub fn best_provider(
     conn: &Connection,
 ) -> Result<Box<dyn ReasoningProvider>, ReasoningUnavailable> {
-    let candidates = providers(conn);
-    if candidates.is_empty() {
-        return Err(ReasoningUnavailable::NoProvider);
-    }
+    usable_providers(conn).map(|mut usable| usable.remove(0))
+}
 
+/// Every provider that may be consulted, in preference order, so a caller
+/// can hand over to the next when one fails. Never empty: when none may be
+/// consulted, the reason the last one gave.
+pub fn usable_providers(
+    conn: &Connection,
+) -> Result<Vec<Box<dyn ReasoningProvider>>, ReasoningUnavailable> {
     let mut last = ReasoningUnavailable::NoProvider;
-    for provider in candidates {
+    let mut usable = Vec::new();
+    for provider in providers(conn) {
         match may_consult(conn, provider.as_ref()) {
-            Ok(()) => return Ok(provider),
+            Ok(()) => usable.push(provider),
             Err(reason) => last = reason,
         }
     }
-    Err(last)
+    if usable.is_empty() {
+        Err(last)
+    } else {
+        Ok(usable)
+    }
 }
 
 // -- Plan validation ----------------------------------------------------------

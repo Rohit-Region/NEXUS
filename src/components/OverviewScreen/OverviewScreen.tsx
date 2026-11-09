@@ -20,6 +20,7 @@ import type { TaskWithProject, WorkspaceSummary } from '../../types/db';
 import { StatTile } from '../StatTile/StatTile';
 import { formatStatus, StatusPill, TASK_STATUS_ORDER } from '../TaskCard/TaskCard';
 import { formatStamp } from '../ProjectCard/ProjectCard';
+import { IS_PHONE } from '../../lib/platform';
 import './OverviewScreen.css';
 
 interface OverviewScreenProps {
@@ -119,7 +120,10 @@ export function OverviewScreen({
         <Scan label="Reading workspace" rows={4} />
       )}
 
-      {summary && isEmpty && (
+      {/* The phone starts with its own empty database until sync, and its
+          home is the command centre either way: weather, briefing and
+          reminders are worth showing before there is any project. */}
+      {summary && isEmpty && !IS_PHONE && (
         <div className="overview__empty">
           <FolderPlus size={28} strokeWidth={1.5} aria-hidden="true" />
           <span className="overview__empty-title">Workspace is empty</span>
@@ -137,7 +141,7 @@ export function OverviewScreen({
         </div>
       )}
 
-      {summary && !isEmpty && (
+      {summary && (!isEmpty || IS_PHONE) && (
         <>
           {/* The command centre: your work on the left, the machine's own
               state on the right, with the core at the head of it. The core
@@ -154,28 +158,34 @@ export function OverviewScreen({
               {/* Off unless the rail says otherwise. It is the one card here
                   that is not about work, so it is the one that has to be
                   asked for. */}
-              {openConnectors.includes('weather') && <WeatherCard />}
+              {(IS_PHONE || openConnectors.includes('weather')) && <WeatherCard />}
 
               {/* Your day before your tickets. It sits first because it is
-                  the only card here with a deadline attached. */}
-              <SchedulePanel />
+                  the only card here with a deadline attached. The calendar
+                  is the Mac's, so the phone leaves it out. */}
+              {!IS_PHONE && <SchedulePanel />}
 
               <JiraPanel ref={jira} />
-              <PrPanel ref={prs} />
-              <StandupPanel />
+              {/* Pull requests come from `gh`, and the standup is built from
+                  them and the calendar: Mac programs, Mac cards. */}
+              {!IS_PHONE && <PrPanel ref={prs} />}
+              {!IS_PHONE && <StandupPanel />}
 
               {/* Reads the versions from your open Avetta tab. Hides itself
-                  when that tab is closed, like the schedule on a clear day. */}
-              <KaiVersionsPanel />
+                  when that tab is closed, like the schedule on a clear day.
+                  The tab is in the Mac's browser. */}
+              {!IS_PHONE && <KaiVersionsPanel />}
 
-              {/* The weekly-rotated credential. Always present, because its
-                  job is to nag when the week is up, and a card that hides
-                  cannot nag. */}
-              <VaultPanel />
+              {/* The weekly-rotated credential. Always present on the Mac,
+                  because its job is to nag when the week is up, and a card
+                  that hides cannot nag. It is used from the Mac's browser,
+                  so the phone leaves it out. */}
+              {!IS_PHONE && <VaultPanel />}
 
               {/* Checks product pages on a 20-minute timer and shouts, across
-                  every channel, the moment one comes back in stock. */}
-              <StockWatchPanel />
+                  every channel, the moment one comes back in stock. It reads
+                  them through the Mac's browser and keeps the Mac awake. */}
+              {!IS_PHONE && <StockWatchPanel />}
 
               <RemindersPanel />
 
@@ -300,16 +310,21 @@ export function OverviewScreen({
                   value={summary.tasks}
                   detail={`${summary.tasksUnassigned} unassigned`}
                 />
-                <StatTile
-                  label="IDEs"
-                  value={summary.idesTotal}
-                  detail={`${summary.idesEnabled} enabled`}
-                />
-                <StatTile
-                  label="AI Agents"
-                  value={summary.agentsTotal}
-                  detail={`${summary.agentsEnabled} enabled`}
-                />
+                {/* The Registry's counts; the Registry stays on the Mac. */}
+                {!IS_PHONE && (
+                  <>
+                    <StatTile
+                      label="IDEs"
+                      value={summary.idesTotal}
+                      detail={`${summary.idesEnabled} enabled`}
+                    />
+                    <StatTile
+                      label="AI Agents"
+                      value={summary.agentsTotal}
+                      detail={`${summary.agentsEnabled} enabled`}
+                    />
+                  </>
+                )}
               </div>
 
               {/* The hero is now the briefing: your news and what matters,

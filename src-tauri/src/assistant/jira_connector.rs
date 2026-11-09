@@ -191,9 +191,8 @@ fn credentials(conn: &Connection) -> Result<Credentials, ActionError> {
     let token =
         keychain_secret(KEYCHAIN_SERVICE, &config.email).ok_or_else(|| ActionError::Failed {
             detail: format!(
-                "No Jira API token found in the Keychain for {}. Add one with: \
-                 security add-generic-password -s {KEYCHAIN_SERVICE} -a {} -w",
-                config.email, config.email
+                "No Jira API token is stored for {}. Add it under Settings > Jira > API token.",
+                config.email
             ),
         })?;
 
@@ -275,6 +274,10 @@ fn read_json(
     match get_json(creds, path) {
         Ok(value) => Ok(value),
         Err(ActionError::Failed { detail }) if detail.contains("credentials") => {
+            // The tab is in the Mac's Chrome; the phone has only the token.
+            if !cfg!(target_os = "macos") {
+                return Err(ActionError::Failed { detail });
+            }
             if !super::jira_browser::permitted(ctx.conn) {
                 return Err(ActionError::Failed {
                     detail: format!(
@@ -1455,7 +1458,7 @@ mod tests {
             r#"{"site":"https://x.atlassian.net","email":"nexus-test-nobody@example.com"}"#,
         );
         let err = credentials(&conn).expect_err("no token exists for that account");
-        assert!(format!("{err:?}").contains("Keychain"), "{err:?}");
+        assert!(format!("{err:?}").contains("API token"), "{err:?}");
     }
 
     // -- Shaping --------------------------------------------------------------

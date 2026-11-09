@@ -1041,6 +1041,8 @@ pub fn nexus_delete_contact(
 const SECRET_SERVICES: &[(&str, &str)] = &[
     ("jira", "nexus-jira"),
     ("github", "nexus-github"),
+    // The account is the vendor: "anthropic" or "openai".
+    ("reasoning", crate::assistant::cloud_provider::KEYCHAIN_SERVICE),
 ];
 
 /// Store a credential for a connector, in the Keychain.
@@ -1766,6 +1768,11 @@ pub fn nexus_set_reasoning_model(
             "openai" => crate::assistant::cloud_provider::set_model(
                 &conn,
                 crate::assistant::cloud_provider::Vendor::OpenAi,
+                &model,
+            )?,
+            "groq" => crate::assistant::cloud_provider::set_model(
+                &conn,
+                crate::assistant::cloud_provider::Vendor::Groq,
                 &model,
             )?,
             other => return Err(format!("NEXUS has no reasoning provider called {other}.")),
@@ -2499,10 +2506,10 @@ pub fn nexus_tax_dates() -> Result<Vec<crate::assistant::bills::TaxDate>, String
 /// profile are read under the lock, which is released before the call: a local
 /// model takes seconds and must not freeze the database.
 fn ask_local_model(state: &State<'_, DbState>, request: String) -> Result<String, String> {
-    let (model, profile) = {
+    let (writer, profile) = {
         let conn = state.0.lock().map_err(|e| format!("Lock error: {e}"))?;
         (
-            crate::assistant::ollama_provider::local_model(&conn),
+            crate::assistant::writer::Writer::for_conn(&conn),
             crate::assistant::profile::as_context_lines(&conn),
         )
     };
@@ -2511,7 +2518,7 @@ fn ask_local_model(state: &State<'_, DbState>, request: String) -> Result<String
     } else {
         format!("About the learner:\n{}\n\n{request}", profile.join("\n"))
     };
-    let text = crate::assistant::ollama_provider::generate_text(&model, &prompt)?;
+    let text = writer.write(state, &prompt)?;
     if text.trim().is_empty() {
         return Err("The model returned nothing. Try again.".to_string());
     }
@@ -3117,12 +3124,12 @@ pub struct TailoredResume {
 /// support. If the model is unavailable the reordered resume still comes back.
 #[tauri::command(async)]
 pub fn nexus_tailor_resume(state: State<'_, DbState>, id: i64) -> Result<TailoredResume, String> {
-    let (resume, model, (company, role, description)) = {
+    let (resume, writer, (company, role, description)) = {
         let conn = state.0.lock().map_err(|e| format!("Lock error: {e}"))?;
         let (resume, company, role, description) = tailoring_inputs(&conn, id)?;
         (
             resume,
-            crate::assistant::ollama_provider::local_model(&conn),
+            crate::assistant::writer::Writer::for_conn(&conn),
             (company, role, description),
         )
     };
@@ -3136,7 +3143,7 @@ pub fn nexus_tailor_resume(state: State<'_, DbState>, id: i64) -> Result<Tailore
          invent numbers, skills, or experience.\n\nRESUME:\n{resume}\n\nJOB:\n{description}"
     );
     let (summary, warnings, note) =
-        match crate::assistant::ollama_provider::generate_text(&model, &prompt) {
+        match writer.write(&state, &prompt) {
             Ok(text) => {
                 let warnings = crate::assistant::tailor::unsupported(
                     &text,
@@ -3183,7 +3190,7 @@ pub struct CoverLetter {
 /// Draft a cover letter for an application, checked for unsupported claims.
 #[tauri::command(async)]
 pub fn nexus_cover_letter(state: State<'_, DbState>, id: i64) -> Result<CoverLetter, String> {
-    let (resume, model, company, role, description, name) = {
+    let (resume, writer, company, role, description, name) = {
         let conn = state.0.lock().map_err(|e| format!("Lock error: {e}"))?;
         let (resume, company, role, description) = tailoring_inputs(&conn, id)?;
         let name = crate::assistant::profile::get_all(&conn)
@@ -3192,7 +3199,7 @@ pub fn nexus_cover_letter(state: State<'_, DbState>, id: i64) -> Result<CoverLet
             .unwrap_or_default();
         (
             resume,
-            crate::assistant::ollama_provider::local_model(&conn),
+            crate::assistant::writer::Writer::for_conn(&conn),
             company,
             role,
             description,
@@ -3210,7 +3217,7 @@ pub fn nexus_cover_letter(state: State<'_, DbState>, id: i64) -> Result<CoverLet
          state. If the job asks for something the resume lacks, do not mention it.{sign_off}\
          \n\nRESUME:\n{resume}\n\nJOB:\n{description}"
     );
-    let text = crate::assistant::ollama_provider::generate_text(&model, &prompt)?;
+    let text = writer.write(&state, &prompt)?;
     let warnings = crate::assistant::tailor::unsupported(
         &text,
         &resume,
@@ -4445,12 +4452,12 @@ pub fn nexus_generate_interview_questions(
     state: State<'_, DbState>,
     id: i64,
 ) -> Result<Vec<InterviewQuestion>, String> {
-    let (resume, model, company, role, description) = {
+    let (resume, writer, company, role, description) = {
         let conn = state.0.lock().map_err(|e| format!("Lock error: {e}"))?;
         let (resume, company, role, description) = tailoring_inputs(&conn, id)?;
         (
             resume,
-            crate::assistant::ollama_provider::local_model(&conn),
+            crate::assistant::writer::Writer::for_conn(&conn),
             company,
             role,
             description,
@@ -4464,7 +4471,7 @@ pub fn nexus_generate_interview_questions(
          specific item on the resume. One question per line, no numbering, no answers, \
          nothing else.\n\nJOB:\n{description}\n\nRESUME:\n{resume}"
     );
-    let text = crate::assistant::ollama_provider::generate_text(&model, &prompt)?;
+    let text = writer.write(&state, &prompt)?;
     let questions = crate::assistant::tailor::parse_questions(&text, 8);
     if questions.is_empty() {
         return Err("The model's questions could not be read. Try again.".to_string());
@@ -4500,7 +4507,7 @@ pub fn nexus_interview_feedback(
     if answer.len() > MAX_DOCUMENT {
         return Err("That answer is too long.".to_string());
     }
-    let (question, resume, model, company, role, description) = {
+    let (question, resume, writer, company, role, description) = {
         let conn = state.0.lock().map_err(|e| format!("Lock error: {e}"))?;
         let (application_id, question): (i64, String) = conn
             .query_row(
@@ -4513,7 +4520,7 @@ pub fn nexus_interview_feedback(
         (
             question,
             resume,
-            crate::assistant::ollama_provider::local_model(&conn),
+            crate::assistant::writer::Writer::for_conn(&conn),
             company,
             role,
             description,
@@ -4534,7 +4541,7 @@ pub fn nexus_interview_feedback(
          (\"I ...\"), using only facts from their answer or resume.\n\n\
          RESUME:\n{resume}"
     );
-    let feedback = crate::assistant::ollama_provider::generate_text(&model, &prompt)?
+    let feedback = writer.write(&state, &prompt)?
         .replace("**", "");
     let warnings = opening_warnings(&feedback, &answer, &resume, &description, &role, &company);
 

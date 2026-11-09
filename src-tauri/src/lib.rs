@@ -35,6 +35,10 @@ pub fn run() {
                 )?;
             }
 
+            // The phone's fingerprint unlock for Spending (`spend_lock`).
+            #[cfg(target_os = "android")]
+            app.handle().plugin(tauri_plugin_biometric::init())?;
+
             // Initialize the SQLite database and register it as managed state.
             let conn = db::init(app.handle()).expect("Failed to initialize NEXUS database");
             commands::load_calendar_switch(&conn);
@@ -312,6 +316,7 @@ pub fn run() {
             commands::spending::nexus_spend_lock,
             commands::spending::nexus_spend_connect,
             commands::spending::nexus_spend_disconnect,
+            commands::spending::nexus_spend_read_inbox,
             commands::spending::nexus_spend_sync,
             commands::spending::nexus_spend_paste,
             commands::spending::nexus_spend_month,

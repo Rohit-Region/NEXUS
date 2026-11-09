@@ -28,7 +28,8 @@ use crate::voice::intent::{resolve_voice_intent, VoiceCommandSpec};
 use super::connector::ReferentDraft;
 use super::context::{work_context, WorkContext};
 use super::reasoning::{
-    build_context, validate_plan, AiContext, Purpose, Reasoning, ValidatedStep,
+    build_context, validate_plan, AiContext, Purpose, Reasoning, ReasoningUnavailable,
+    ValidatedStep,
 };
 use super::referent::ReferentKind;
 use super::session::SessionSnapshot;
@@ -1921,9 +1922,10 @@ fn escalate(
     commands: &[VoiceCommandSpec],
 ) -> Response {
     // Local first, then any configured cloud provider, with the privacy
-    // switch applied per provider rather than globally.
-    let provider = match super::reasoning::best_provider(conn) {
-        Ok(provider) => provider,
+    // switch applied per provider rather than globally. One that fails hands
+    // over to the next, so a free backup answers when a paid one cannot.
+    let usable = match super::reasoning::usable_providers(conn) {
+        Ok(usable) => usable,
         Err(unavailable) => {
             return Response::plain(AssistantReply::Unresolved {
                 // Nothing was made of the words locally, and there is no
@@ -1946,21 +1948,28 @@ fn escalate(
         ),
     };
 
-    let started = std::time::Instant::now();
-    let outcome = provider.reason(Purpose::Plan, &context);
+    let mut outcome = Err(ReasoningUnavailable::NoProvider);
+    for provider in &usable {
+        let started = std::time::Instant::now();
+        outcome = provider.reason(Purpose::Plan, &context);
 
-    // Categories, never contents. This is the row that answers "why did NEXUS
-    // contact a provider", and it is written whether or not the call worked.
-    let _ = super::reasoning::record_use(
-        conn,
-        provider.id(),
-        &provider.model(),
-        provider.reach(),
-        Purpose::Plan,
-        &context.categories,
-        if outcome.is_ok() { "ok" } else { "failed" },
-        started.elapsed().as_millis(),
-    );
+        // Categories, never contents. This is the row that answers "why did
+        // NEXUS contact a provider", and it is written whether or not the
+        // call worked.
+        let _ = super::reasoning::record_use(
+            conn,
+            provider.id(),
+            &provider.model(),
+            provider.reach(),
+            Purpose::Plan,
+            &context.categories,
+            if outcome.is_ok() { "ok" } else { "failed" },
+            started.elapsed().as_millis(),
+        );
+        if outcome.is_ok() {
+            break;
+        }
+    }
 
     match outcome {
         Ok(Reasoning::Answer { text }) => Response::plain(AssistantReply::Answer {

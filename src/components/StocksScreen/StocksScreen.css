@@ -906,3 +906,31 @@
   display: inline-block;
   margin-left: var(--space-sm);
 }
+
+/* ── On the phone ─────────────────────────────────────────────────────── */
+/*
+ * Scoped to the phone shell, so the Mac's layout is untouched. The table
+ * still scrolls sideways, but the stock's name stays pinned on the left so
+ * every number can be read against it.
+ */
+.phone-shell .stocks-table .stocks-table__name {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  max-width: 130px;
+  background: var(--color-bg-primary);
+  border-right: 1px solid var(--color-border);
+}
+
+.phone-shell .stocks-table th.stocks-table__name {
+  background: var(--color-bg-secondary);
+}
+
+.phone-shell .stocks-table__long {
+  max-width: 120px;
+}
+
+.phone-shell .stocks-table th,
+.phone-shell .stocks-table td {
+  padding: 10px 10px;
+}
