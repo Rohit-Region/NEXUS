@@ -19,6 +19,10 @@
 //! this makes the second request itself, and only after checking the target
 //! is exactly that Google host over HTTPS. The target carries no key: it is
 //! Google's own short-lived reference to the response.
+//!
+//! The phone reads its own inbox instead (`android_sms.rs`) and only borrows
+//! `Row` from here, so the fetching is unused there.
+#![cfg_attr(target_os = "android", allow(dead_code))]
 
 use serde::Deserialize;
 

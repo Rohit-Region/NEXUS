@@ -11,6 +11,7 @@ import {
   type CloneRun,
   type CloneStatus,
 } from '../../lib/nexus-db';
+import { IS_PHONE } from '../../lib/platform';
 import './CloneScreen.css';
 
 const LIVE: CloneStatus[] = ['queued', 'preparing', 'editing', 'testing'];
@@ -184,6 +185,12 @@ export function CloneScreen() {
       </header>
 
       {status && <p className="clone__status">{status}</p>}
+
+      {IS_PHONE && (
+        <p className="clone__note">
+          A task runs Claude Code on the project's folder, so it starts from NEXUS on the Mac.
+        </p>
+      )}
 
       <section className="clone__card">
         <h2 className="clone__h2">

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useImperativeHandle, useState, forwardRef } from 'react';
 import { ExternalLink, RefreshCw } from 'lucide-react';
-import { runAction } from '../../lib/assistant';
+import { runAction, isActionError, describeActionError } from '../../lib/assistant';
 import './JiraPanel.css';
 
 interface Issue {
@@ -109,7 +109,7 @@ export const JiraPanel = forwardRef<JiraPanelHandle>(function JiraPanel(_props, 
       setError(null);
       setChecked(new Date());
     } catch (err) {
-      setError(String(err));
+      setError(isActionError(err) ? describeActionError(err) : String(err));
     } finally {
       setBusy(false);
     }

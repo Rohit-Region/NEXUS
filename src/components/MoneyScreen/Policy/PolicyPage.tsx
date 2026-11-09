@@ -11,6 +11,7 @@ import {
 } from '../../../lib/nexus-db';
 import { LineChart, type Point, type Series } from './LineChart';
 import { BestForYou, Comparison, Glide, Pct, PlanFacts, Projection, rupees, SLOTS } from './PlanSections';
+import { IS_PHONE } from '../../../lib/platform';
 import './PolicyPage.css';
 
 const PERIODS: { id: string; label: string; days: number | null }[] = [
@@ -316,8 +317,8 @@ export function PolicyPage({ group, onBack }: { group: PortfolioGroup; onBack: (
               label={`Growth of ${rupees(START, 0)} over ${periodLabel} for ${growth.map((s) => s.label).join(', ')}`}
             />
             <p className="policy__note">
-              Each line starts at {rupees(START, 0)} at the start of the period, or at launch for a younger fund. Hover for
-              values on a day.
+              Each line starts at {rupees(START, 0)} at the start of the period, or at launch for a younger fund.{' '}
+              {IS_PHONE ? 'Drag along it' : 'Hover'} for values on a day.
             </p>
           </section>
 

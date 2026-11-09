@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AppShell } from './components/AppShell/AppShell';
+import { PhoneShell } from './components/PhoneShell/PhoneShell';
+import { IS_PHONE } from './lib/platform';
 import { getSettings } from './lib/nexus-db';
 import { DEFAULT_SETTINGS } from './types';
 import type { Settings } from './types/db';
@@ -108,6 +110,10 @@ export function App() {
         </span>
       </div>
     );
+  }
+
+  if (IS_PHONE) {
+    return <PhoneShell settings={settings} onSettingsChange={handleSettingsChange} />;
   }
 
   return (

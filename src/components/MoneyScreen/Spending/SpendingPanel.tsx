@@ -8,6 +8,7 @@ import {
   spendUnlock,
   spendAdd,
   spendConnect,
+  spendReadInbox,
   spendDelete,
   spendIgnore,
   spendMonth,
@@ -35,6 +36,7 @@ import { SpendTransactions, type TxFilter } from './SpendTransactions';
 import { ExpenseForm } from './ExpenseForm';
 import { SplitEditor } from './SplitEditor';
 import { ago, dayLabel, errorText, inr, monthLabel, shiftMonth, toInput } from './format';
+import { IS_PHONE } from '../../../lib/platform';
 import './Spending.css';
 
 /** The tab re-reads while open, so payments synced in the background appear
@@ -177,6 +179,32 @@ export function SpendingPanel() {
     }
   }, [link, sync, fail]);
 
+  // The phone's permission prompt answers outside the page, so after asking,
+  // look again every few seconds until reading is allowed or two minutes pass.
+  const [askingInbox, setAskingInbox] = useState(false);
+  const readInbox = useCallback(async () => {
+    try {
+      await spendReadInbox();
+      setAskingInbox(true);
+    } catch (err) {
+      fail(err);
+    }
+  }, [fail]);
+  useEffect(() => {
+    if (!askingInbox) return;
+    const started = Date.now();
+    const t = window.setInterval(() => {
+      void spendStatus().then((s) => {
+        if (s.connected || Date.now() - started > 120_000) {
+          setAskingInbox(false);
+          setStatus(s);
+          if (s.connected) void sync();
+        }
+      });
+    }, 1500);
+    return () => window.clearInterval(t);
+  }, [askingInbox, sync]);
+
   const accounts = useMemo(() => {
     const seen = new Set(DEFAULT_ACCOUNTS);
     data?.transactions.forEach((t) => seen.add(t.account));
@@ -252,7 +280,9 @@ export function SpendingPanel() {
               : status.lastSync
                 ? `Synced ${ago(status.lastSync)}`
                 : 'Not synced yet'
-            : 'Bank SMS not connected'}
+            : IS_PHONE
+              ? 'Not reading bank texts'
+              : 'Bank SMS not connected'}
         </span>
         {status?.connected && (
           <button
@@ -314,11 +344,25 @@ export function SpendingPanel() {
       )}
       {status?.connected && status.lastError && <p className="spend-error">{status.lastError}</p>}
 
-      {status && !status.connected && (
+      {status && !status.connected && IS_PHONE && (
+        <div className="spend-connect">
+          <p>
+            NEXUS can read your ICICI and HDFC texts on this phone to bring in payments automatically. One-time codes
+            are skipped, and nothing leaves the phone. You can still add payments by hand without it.
+          </p>
+          <div className="spend-connect__row">
+            <button className="spend-form__submit" type="button" onClick={() => void readInbox()} disabled={askingInbox}>
+              {askingInbox ? 'Waiting for permission…' : 'Read bank texts'}
+            </button>
+          </div>
+        </div>
+      )}
+      {status && !status.connected && !IS_PHONE && (
         <div className="spend-connect">
           <p>
             Paste your bank SMS link (the Google script link ending in <code>/exec?k=…</code>) to bring in payments
-            automatically. It is kept in the macOS Keychain. You can still add payments by hand without it.
+            automatically. It is kept in the macOS Keychain.
+            You can still add payments by hand without it.
           </p>
           <div className="spend-connect__row">
             <input

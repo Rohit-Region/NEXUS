@@ -15,6 +15,7 @@ import { MacAccessPanel } from '../MacAccessPanel/MacAccessPanel';
 import { ContactsPanel } from '../ContactsPanel/ContactsPanel';
 import { ReasoningPanel } from '../ReasoningPanel/ReasoningPanel';
 import { SettingsForm } from '../SettingsForm/SettingsForm';
+import { IS_PHONE } from '../../lib/platform';
 import './SettingsScreen.css';
 
 interface SettingsScreenProps {
@@ -193,7 +194,7 @@ export function SettingsScreen({ settings, onSettingsChange }: SettingsScreenPro
       {/* NEXUS-012. Its own panel rather than a fieldset in SettingsForm:
           the form is presentational and calls no command, and permissions
           are read and written live rather than saved with the rest. */}
-      {!loading && (
+      {!loading && !IS_PHONE && (
         <MacAccessPanel
           voiceEnabled={values.voiceEnabled}
           onVoiceChange={(on) => void handleSave({ ...values, voiceEnabled: on })}

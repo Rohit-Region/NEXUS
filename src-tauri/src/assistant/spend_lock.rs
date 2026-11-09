@@ -19,7 +19,10 @@
 //! password offered by macOS itself when Touch ID is unavailable. NEXUS never
 //! sees a fingerprint or the password, only macOS's yes or no.
 //!
-//! Off the Mac there is no way to ask yet, so it stays locked.
+//! On Android: the phone's own fingerprint or face unlock, with its PIN
+//! offered by Android when neither is set up, through
+//! `tauri-plugin-biometric`. Elsewhere there is no way to ask, so it stays
+//! locked.
 
 #[cfg(target_os = "macos")]
 use std::sync::mpsc;
@@ -103,7 +106,7 @@ pub fn method() -> &'static str {
 /// Ask macOS to confirm it is the owner: Touch ID, or the login password.
 /// Blocks until answered (or `PROMPT_TIMEOUT`), so call it off the main thread.
 #[cfg(target_os = "macos")]
-pub fn unlock() -> Result<(), String> {
+pub fn unlock(_app: &tauri::AppHandle) -> Result<(), String> {
     let context = unsafe { LAContext::new() };
     let policy = LAPolicy::DeviceOwnerAuthentication;
     if let Err(e) = unsafe { context.canEvaluatePolicy_error(policy) } {
@@ -132,9 +135,27 @@ pub fn method() -> &'static str {
     "biometric"
 }
 
-#[cfg(not(target_os = "macos"))]
-pub fn unlock() -> Result<(), String> {
-    Err("Spending cannot be unlocked on this device yet.".to_string())
+/// Ask Android to confirm it is the owner: fingerprint, face, or the phone's
+/// PIN. Blocks until answered, so call it off the main thread.
+#[cfg(target_os = "android")]
+pub fn unlock(app: &tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_biometric::{AuthOptions, BiometricExt};
+    let options = AuthOptions {
+        allow_device_credential: true,
+        title: Some("Unlock Spending".to_string()),
+        subtitle: Some("Confirm it is you to see your spending".to_string()),
+        ..Default::default()
+    };
+    app.biometric()
+        .authenticate("show your spending".to_string(), options)
+        .map_err(|_| "Not unlocked.".to_string())?;
+    *LAST_USE.lock().unwrap_or_else(|e| e.into_inner()) = Some(now_unix());
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "android")))]
+pub fn unlock(_app: &tauri::AppHandle) -> Result<(), String> {
+    Err("Spending cannot be unlocked on this device.".to_string())
 }
 
 #[cfg(test)]

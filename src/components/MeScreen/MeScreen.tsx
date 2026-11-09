@@ -4,6 +4,7 @@ import { getProfile, setProfileField } from '../../lib/nexus-db';
 import { WellbeingSettings } from './WellbeingSettings';
 import { PhoneApprovalSettings } from './PhoneApprovalSettings';
 import { PhoneCallSettings } from './PhoneCallSettings';
+import { IS_PHONE } from '../../lib/platform';
 import './MeScreen.css';
 
 /**
@@ -215,9 +216,15 @@ export function MeScreen() {
             </div>
           </section>
         ))}
-        <WellbeingSettings />
-        <PhoneCallSettings />
-        <PhoneApprovalSettings />
+        {/* How the Mac nudges you and reaches your phone. The phone app is
+            the phone, so these are set up on the Mac. */}
+        {!IS_PHONE && (
+          <>
+            <WellbeingSettings />
+            <PhoneCallSettings />
+            <PhoneApprovalSettings />
+          </>
+        )}
       </div>
     </div>
   );

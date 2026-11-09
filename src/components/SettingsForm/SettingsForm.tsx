@@ -18,6 +18,7 @@ import type {
 } from '../../types/db';
 import { RegistrySelect } from '../RegistryPanel/RegistrySelect';
 import { StatusPill, TASK_STATUS_ORDER, formatStatus } from '../TaskCard/TaskCard';
+import { IS_PHONE } from '../../lib/platform';
 import './SettingsForm.css';
 
 interface SettingsFormProps {
@@ -257,130 +258,133 @@ export function SettingsForm({
         </span>
       </fieldset>
 
-      <fieldset className="settings-form__group">
-        <legend className="settings-form__legend">Voice</legend>
-        <label className="settings-form__toggle">
-          <input
-            type="checkbox"
-            checked={values.voiceEnabled}
-            onChange={(e) => setField('voiceEnabled', e.target.checked)}
-            disabled={submitting}
-          />
-          <span className="settings-form__label">
-            Enable on-device voice commands
-          </span>
-        </label>
-        <span className="settings-form__hint">
-          Off by default. The microphone never starts while this is off.
-          Recognition runs entirely on this Mac; audio and transcripts are
-          never stored or sent anywhere. Voice can only run commands the
-          keyboard palette already offers, and nothing executes without your
-          confirmation.
-        </span>
-
-        <label className="settings-form__toggle">
-          <input
-            type="checkbox"
-            checked={values.alwaysListening}
-            onChange={(e) => setField('alwaysListening', e.target.checked)}
-            disabled={submitting || !values.voiceEnabled}
-          />
-          <span className="settings-form__label">
-            Always listening for &ldquo;Nexus&rdquo;
-          </span>
-        </label>
-        <span className="settings-form__hint">
-          Keeps the microphone open so you can call NEXUS by name instead of
-          pressing the button. Only sentences that start with
-          &ldquo;Nexus&rdquo; are acted on; everything else it hears is
-          discarded without being matched or shown. Recognition stays on this
-          Mac, and still nothing is stored. Expect noticeably more battery use
-          on an unplugged laptop.
-        </span>
-
-        <div className="settings-form__field">
-          <label className="settings-form__label" htmlFor="settings-wake-replies">
-            Replies when called
+      {/* Voice is Apple's speech recognition, so it is set up on the Mac. */}
+      {!IS_PHONE && (
+        <fieldset className="settings-form__group">
+          <legend className="settings-form__legend">Voice</legend>
+          <label className="settings-form__toggle">
+            <input
+              type="checkbox"
+              checked={values.voiceEnabled}
+              onChange={(e) => setField('voiceEnabled', e.target.checked)}
+              disabled={submitting}
+            />
+            <span className="settings-form__label">
+              Enable on-device voice commands
+            </span>
           </label>
-          <textarea
-            id="settings-wake-replies"
-            className="nexus-input"
-            rows={3}
-            value={values.wakeReplies.join('\n')}
-            onChange={(e) =>
-              setField('wakeReplies', e.target.value.split('\n'))
-            }
-            disabled={submitting || !values.voiceEnabled || !values.alwaysListening}
-          />
           <span className="settings-form__hint">
-            One per line, spoken in rotation. Blank lines are ignored; clearing
-            the field restores the defaults.
+            Off by default. The microphone never starts while this is off.
+            Recognition runs entirely on this Mac; audio and transcripts are
+            never stored or sent anywhere. Voice can only run commands the
+            keyboard palette already offers, and nothing executes without your
+            confirmation.
           </span>
-        </div>
 
-        <div className="settings-form__field">
-          <label className="settings-form__label" htmlFor="settings-voice-name">
-            Response voice
+          <label className="settings-form__toggle">
+            <input
+              type="checkbox"
+              checked={values.alwaysListening}
+              onChange={(e) => setField('alwaysListening', e.target.checked)}
+              disabled={submitting || !values.voiceEnabled}
+            />
+            <span className="settings-form__label">
+              Always listening for &ldquo;Nexus&rdquo;
+            </span>
           </label>
-          <select
-            id="settings-voice-name"
-            className="nexus-select"
-            value={selectedVoiceValue}
-            onChange={(e) => setField('voiceName', e.target.value)}
-            disabled={submitting || !values.voiceEnabled}
-          >
-            {localeVoices.length > 0 && (
-              <optgroup label="English (India)">
-                {localeVoices.map((voice) => (
-                  <option key={voice.id} value={voice.id}>
-                    {voiceLabel(voice)}
-                  </option>
-                ))}
-              </optgroup>
-            )}
-            {femaleVoices.length > 0 && (
-              <optgroup label={femaleGroupLabel}>
-                {femaleVoices.map((voice) => (
-                  <option key={voice.id} value={voice.id}>
-                    {voiceLabel(voice)}
-                  </option>
-                ))}
-              </optgroup>
-            )}
-            {otherVoices.length > 0 && (
-              <optgroup label="Other voices">
-                {otherVoices.map((voice) => (
-                  <option key={voice.id} value={voice.id}>
-                    {voiceLabel(voice)}
-                  </option>
-                ))}
-              </optgroup>
-            )}
-            {/*
-              A saved preference that no longer resolves still renders, rather
-              than the browser silently selecting the first option and making
-              it look as though the user chose it. Mirrors how RegistrySelect
-              keeps a disabled default visible.
-            */}
-            {missingVoice && (
-              <option value={missingVoice}>
-                {missingVoice} (not available on this Mac)
-              </option>
-            )}
-            <option value="">System default</option>
-          </select>
-        </div>
-        <span className="settings-form__hint">
-          {missingVoice
-            ? `${missingVoice} is not available to NEXUS on this Mac, so responses use ${
-                fallbackVoice ? fallbackVoice.name : 'the system default voice'
-              } instead. Pick a voice above to choose deliberately.`
-            : 'Only voices macOS exposes to app speech are listed, which is a smaller set than the Dictation voice list. More can be installed in System Settings, under Accessibility then Spoken Content.'}{' '}
-          Spoken with a voice installed on this Mac; nothing is generated
-          online. NEXUS speaks only after a command runs, or after a phrase
-          definitively matches nothing, and never while it is listening.
-        </span>
-      </fieldset>
+          <span className="settings-form__hint">
+            Keeps the microphone open so you can call NEXUS by name instead of
+            pressing the button. Only sentences that start with
+            &ldquo;Nexus&rdquo; are acted on; everything else it hears is
+            discarded without being matched or shown. Recognition stays on this
+            Mac, and still nothing is stored. Expect noticeably more battery use
+            on an unplugged laptop.
+          </span>
+
+          <div className="settings-form__field">
+            <label className="settings-form__label" htmlFor="settings-wake-replies">
+              Replies when called
+            </label>
+            <textarea
+              id="settings-wake-replies"
+              className="nexus-input"
+              rows={3}
+              value={values.wakeReplies.join('\n')}
+              onChange={(e) =>
+                setField('wakeReplies', e.target.value.split('\n'))
+              }
+              disabled={submitting || !values.voiceEnabled || !values.alwaysListening}
+            />
+            <span className="settings-form__hint">
+              One per line, spoken in rotation. Blank lines are ignored; clearing
+              the field restores the defaults.
+            </span>
+          </div>
+
+          <div className="settings-form__field">
+            <label className="settings-form__label" htmlFor="settings-voice-name">
+              Response voice
+            </label>
+            <select
+              id="settings-voice-name"
+              className="nexus-select"
+              value={selectedVoiceValue}
+              onChange={(e) => setField('voiceName', e.target.value)}
+              disabled={submitting || !values.voiceEnabled}
+            >
+              {localeVoices.length > 0 && (
+                <optgroup label="English (India)">
+                  {localeVoices.map((voice) => (
+                    <option key={voice.id} value={voice.id}>
+                      {voiceLabel(voice)}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {femaleVoices.length > 0 && (
+                <optgroup label={femaleGroupLabel}>
+                  {femaleVoices.map((voice) => (
+                    <option key={voice.id} value={voice.id}>
+                      {voiceLabel(voice)}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {otherVoices.length > 0 && (
+                <optgroup label="Other voices">
+                  {otherVoices.map((voice) => (
+                    <option key={voice.id} value={voice.id}>
+                      {voiceLabel(voice)}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {/*
+                A saved preference that no longer resolves still renders, rather
+                than the browser silently selecting the first option and making
+                it look as though the user chose it. Mirrors how RegistrySelect
+                keeps a disabled default visible.
+              */}
+              {missingVoice && (
+                <option value={missingVoice}>
+                  {missingVoice} (not available on this Mac)
+                </option>
+              )}
+              <option value="">System default</option>
+            </select>
+          </div>
+          <span className="settings-form__hint">
+            {missingVoice
+              ? `${missingVoice} is not available to NEXUS on this Mac, so responses use ${
+                  fallbackVoice ? fallbackVoice.name : 'the system default voice'
+                } instead. Pick a voice above to choose deliberately.`
+              : 'Only voices macOS exposes to app speech are listed, which is a smaller set than the Dictation voice list. More can be installed in System Settings, under Accessibility then Spoken Content.'}{' '}
+            Spoken with a voice installed on this Mac; nothing is generated
+            online. NEXUS speaks only after a command runs, or after a phrase
+            definitively matches nothing, and never while it is listening.
+          </span>
+        </fieldset>
+      )}
 
       <div className="settings-form__actions">
         <button

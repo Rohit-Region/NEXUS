@@ -13,6 +13,11 @@
 //! everything NEXUS can do.
 
 pub mod calendar_store;
+pub mod writer;
+#[cfg(target_os = "android")]
+pub mod android_secrets;
+#[cfg(target_os = "android")]
+pub mod android_sms;
 pub mod career;
 pub mod kai_connector;
 pub mod learn;

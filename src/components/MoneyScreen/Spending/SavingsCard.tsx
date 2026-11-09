@@ -40,7 +40,7 @@ export function SavingsCard({ data, onIncome, onMonth }: Props) {
         type="number"
         min="0"
         inputMode="numeric"
-        autoFocus
+        autoFocus={editing}
         placeholder="₹ take-home per month"
         value={draft}
         onChange={(e) => setDraft(e.target.value)}

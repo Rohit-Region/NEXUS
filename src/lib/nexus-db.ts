@@ -1172,6 +1172,11 @@ export function spendConnect(link: string): Promise<SpendStatus> {
   return invoke<SpendStatus>('nexus_spend_connect', { link });
 }
 
+/** On the phone: ask to read its texts. Resolves before the user answers. */
+export function spendReadInbox(): Promise<void> {
+  return invoke<void>('nexus_spend_read_inbox');
+}
+
 export function spendDisconnect(): Promise<SpendStatus> {
   return invoke<SpendStatus>('nexus_spend_disconnect');
 }

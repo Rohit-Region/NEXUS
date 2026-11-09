@@ -20,6 +20,7 @@ import type {
   AssistantReply,
   AssistantState,
   Choice,
+  ProposedStep,
   SessionSnapshot,
 } from '../../types/assistant';
 import type { NexusView } from '../../types';
@@ -27,6 +28,7 @@ import type { Project } from '../../types/db';
 import { ApprovalPrompt } from '../ApprovalPrompt/ApprovalPrompt';
 import { ResultList } from '../ResultList/ResultList';
 import type { NeedsApproval } from '../../types/assistant';
+import { IS_PHONE } from '../../lib/platform';
 import './AssistantPanel.css';
 
 interface AssistantPanelProps {
@@ -168,6 +170,9 @@ export function AssistantPanel({
   const [snapshot, setSnapshot] = useState<SessionSnapshot | null>(null);
   const [draft, setDraft] = useState('');
   const [reply, setReply] = useState<AssistantReply | null>(null);
+  // What NEXUS raised on its own, such as a reminder coming due. Shown as
+  // well as spoken, for the same reason as an unresolved reply.
+  const [announcement, setAnnouncement] = useState<string | null>(null);
   const [pending, setPending] = useState<NeedsApproval | null>(null);
   /**
    * The request the pending approval belongs to, kept whole.
@@ -252,7 +257,7 @@ export function AssistantPanel({
 
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
-  }, [snapshot, reply]);
+  }, [snapshot, reply, announcement]);
 
   // ── Running what NEXUS resolved ──────────────────────────────────────────
 
@@ -385,6 +390,7 @@ export function AssistantPanel({
       setBusy(true);
       setError(null);
       setReply(null);
+      setAnnouncement(null);
       setResult(null);
       try {
         const projects: Project[] = await listProjects();
@@ -437,6 +443,9 @@ export function AssistantPanel({
               .join(', or ')}. Which one?`,
           );
           onExpectAnswer();
+        } else if (answer.kind === 'proposal') {
+          say(answer.rationale || 'Here is what I would do.');
+          onExpectAnswer();
         }
 
         // A single clear action runs immediately. It still passes the gate,
@@ -474,6 +483,7 @@ export function AssistantPanel({
       const stop = await onNotification((poll) => {
         if (!poll.announcement) return;
         onOpen();
+        setAnnouncement(poll.announcement);
         say(poll.announcement);
         // NEXUS asked, so it has to listen for the answer the same way it
         // does for its own questions.
@@ -604,6 +614,14 @@ export function AssistantPanel({
           />
         )}
 
+        {announcement && <p className="assistant-panel__greeting">{announcement}</p>}
+
+        {/* Shown as well as spoken: with voice off, or on the phone where
+            there is none, saying it was the only place it went. */}
+        {reply?.kind === 'unresolved' && (
+          <p className="assistant-panel__reply">{reply.reason}</p>
+        )}
+
         {reply?.kind === 'answer' && reply.cited.length > 0 && (
           <p className="assistant-panel__cited">
             Based on {reply.cited.join(', ')}
@@ -627,6 +645,29 @@ export function AssistantPanel({
                 disabled={busy}
               >
                 {choice.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* A model's suggestion is only an offer: each step runs when
+            tapped, and still stops at the gate if it writes anything. */}
+        {reply?.kind === 'proposal' && (
+          <div className="assistant-panel__choices">
+            {reply.rationale && (
+              <p className="assistant-panel__reply">{reply.rationale}</p>
+            )}
+            {reply.steps.map((step: ProposedStep, index: number) => (
+              <button
+                className="nexus-btn nexus-btn--secondary"
+                type="button"
+                key={`${index}:${step.actionId}`}
+                onClick={() =>
+                  void execute({ actionId: step.actionId, input: step.input })
+                }
+                disabled={busy}
+              >
+                {step.summary}
               </button>
             ))}
           </div>
@@ -679,20 +720,23 @@ export function AssistantPanel({
           spellCheck={false}
           disabled={busy}
         />
-        <button
-          className="assistant-panel__mic"
-          type="button"
-          onClick={onVoiceToggle}
-          disabled={!voiceEnabled}
-          aria-pressed={voiceActive}
-          title={
-            voiceEnabled
-              ? 'Speak to NEXUS'
-              : 'Turn on voice in Settings to use the microphone'
-          }
-        >
-          <Mic size={13} strokeWidth={2} aria-hidden="true" />
-        </button>
+        {/* Voice is Apple's speech recognition, so the phone has no mic. */}
+        {!IS_PHONE && (
+          <button
+            className="assistant-panel__mic"
+            type="button"
+            onClick={onVoiceToggle}
+            disabled={!voiceEnabled}
+            aria-pressed={voiceActive}
+            title={
+              voiceEnabled
+                ? 'Speak to NEXUS'
+                : 'Turn on voice in Settings to use the microphone'
+            }
+          >
+            <Mic size={13} strokeWidth={2} aria-hidden="true" />
+          </button>
+        )}
         <button
           className="assistant-panel__send"
           type="submit"

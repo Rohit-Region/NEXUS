@@ -479,6 +479,7 @@ mod via_ureq {
 /// `-w <value>` would put a refresh token in the process table where any
 /// process on the machine could read it with `ps`. `security` prompts twice
 /// for confirmation, so the value is sent twice.
+#[cfg(not(target_os = "android"))]
 pub fn store_keychain_secret(service: &str, account: &str, secret: &str) -> Result<(), String> {
     let out = super::shell::run_with_stdin(
         "/usr/bin/security",
@@ -534,6 +535,7 @@ pub fn store_keychain_secret(service: &str, account: &str, secret: &str) -> Resu
 }
 
 /// Remove a secret. Used when signing out, so nothing is left behind.
+#[cfg(not(target_os = "android"))]
 pub fn forget_keychain_secret(service: &str, account: &str) -> Result<(), String> {
     let _ = super::shell::run(
         "/usr/bin/security",
@@ -544,6 +546,7 @@ pub fn forget_keychain_secret(service: &str, account: &str) -> Result<(), String
     Ok(())
 }
 
+#[cfg(not(target_os = "android"))]
 pub fn keychain_secret(service: &str, account: &str) -> Option<String> {
     let out = super::shell::run(
         "/usr/bin/security",
@@ -555,6 +558,23 @@ pub fn keychain_secret(service: &str, account: &str) -> Option<String> {
         return None;
     }
     Some(out.stdout)
+}
+
+/// On the phone the same three calls go to its own secret store, encrypted
+/// with a key held by the Android Keystore (`android_secrets`).
+#[cfg(target_os = "android")]
+pub fn store_keychain_secret(service: &str, account: &str, secret: &str) -> Result<(), String> {
+    super::android_secrets::put(service, account, secret)
+}
+
+#[cfg(target_os = "android")]
+pub fn forget_keychain_secret(service: &str, account: &str) -> Result<(), String> {
+    super::android_secrets::remove(service, account)
+}
+
+#[cfg(target_os = "android")]
+pub fn keychain_secret(service: &str, account: &str) -> Option<String> {
+    super::android_secrets::get(service, account)
 }
 
 #[cfg(test)]

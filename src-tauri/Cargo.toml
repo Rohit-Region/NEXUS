@@ -70,6 +70,12 @@ block2 = "0.6"
 # have, and none in the Mac app.
 [target.'cfg(target_os = "android")'.dependencies]
 ureq = { version = "3", default-features = false, features = ["rustls"] }
+# The phone's fingerprint or face unlock for Spending, as Touch ID is on the Mac.
+# 2.3 is the newest that works with this Tauri (2.11); 2.4 and later need 2.12.
+tauri-plugin-biometric = "~2.3.2"
+# Calls the phone's secret store (`assistant/android_secrets.rs`). Already in
+# the Android build through Tauri, so it adds no crate.
+jni = "0.21"
 
 # The same client in the Mac's tests, so both transports are checked against
 # each other there. A dev-dependency, so it never reaches the Mac app.

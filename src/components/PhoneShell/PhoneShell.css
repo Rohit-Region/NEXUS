@@ -1,0 +1,137 @@
+.phone-shell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  background-color: var(--color-bg-primary);
+  overflow: hidden;
+}
+
+.phone-shell__header {
+  display: flex;
+  align-items: center;
+  padding: var(--space-sm) var(--space-md);
+  background-color: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+/* One phone-sized margin for every screen, in place of the Mac's 40px. The
+   personal screens carry a margin of their own as well, which goes. */
+.phone-shell .dashboard__scroll {
+  padding: var(--space-md);
+  align-items: stretch;
+}
+
+.phone-shell :is(.money, .stocks, .career, .learn, .news, .clone, .me-screen) {
+  padding: 0;
+}
+
+.phone-shell__tabs {
+  display: flex;
+  flex-shrink: 0;
+  background-color: var(--color-bg-secondary);
+  border-top: 1px solid var(--color-border);
+}
+
+/* 56px tall: comfortably above the 48px minimum touch target. */
+.phone-shell__tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  height: 56px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  border-top: 2px solid transparent;
+}
+
+.phone-shell__tab[aria-current='page'] {
+  color: var(--color-text-primary);
+  border-top-color: var(--color-accent);
+}
+
+.phone-shell__tab:focus-visible {
+  outline: none;
+  background-color: var(--color-bg-tertiary);
+}
+
+/* "More" and the assistant cover the screen but leave the tab bar, so the
+   way back is always where the thumb already is. 57px is the bar: 56px of
+   tab and its 1px border. */
+.phone-shell__more,
+.phone-shell .assistant-panel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 57px;
+  width: auto;
+  border-left: none;
+  box-shadow: none;
+  z-index: var(--z-overlay);
+}
+
+.phone-shell__more {
+  display: flex;
+  flex-direction: column;
+  background-color: var(--color-bg-primary);
+}
+
+.phone-shell__more-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--color-border);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+.phone-shell__close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  color: var(--color-text-secondary);
+}
+
+.phone-shell__more-list {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-sm) 0;
+  overflow-y: auto;
+}
+
+.phone-shell__more-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  width: 100%;
+  min-height: 56px;
+  padding: 0 var(--space-lg);
+  font-size: 15px;
+  color: var(--color-text-primary);
+  text-align: left;
+}
+
+.phone-shell__more-item[aria-current='page'] {
+  color: var(--color-accent);
+}
+
+.phone-shell__more-item:focus-visible {
+  outline: none;
+  background-color: var(--color-bg-tertiary);
+}

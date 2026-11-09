@@ -229,7 +229,7 @@ pub fn nexus_set_invest_risk(state: State<'_, DbState>, risk: String) -> Result<
 #[tauri::command(async)]
 pub fn nexus_news_radar(state: State<'_, DbState>, refresh: Option<bool>) -> Result<Radar, String> {
     let now = now_unix();
-    let (cached, news_settings, external_ok, local_model, held, feedback, bands) = {
+    let (cached, news_settings, external_ok, writer, held, feedback, bands) = {
         let conn = lock(&state)?;
         let cached: Option<Radar> = setting(&conn, RADAR_KEY).and_then(|raw| serde_json::from_str(&raw).ok());
         let held: HashSet<String> = my_trades::holdings(&conn)
@@ -241,7 +241,7 @@ pub fn nexus_news_radar(state: State<'_, DbState>, refresh: Option<bool>) -> Res
             cached,
             setting(&conn, "news_settings").and_then(|raw| serde_json::from_str(&raw).ok()).unwrap_or_default(),
             reasoning::read_policy(&conn).external_reasoning_allowed,
-            crate::assistant::ollama_provider::local_model(&conn),
+            crate::assistant::writer::Writer::for_conn(&conn),
             held,
             pick_journal::news_feedback(&conn, 1)?,
             pick_journal::calibration(&conn, KIND_NEWS, 1)?,
@@ -285,9 +285,9 @@ pub fn nexus_news_radar(state: State<'_, DbState>, refresh: Option<bool>) -> Res
         }
     }
     if answer.is_none() {
-        match crate::assistant::ollama_provider::generate_text(&local_model, &news_radar::prompt(&inputs, &flows, false)) {
-            Ok(text) => answer = Some((text, "ollama", local_model.clone())),
-            Err(e) => tried.push(format!("local model: {e}")),
+        match writer.write(&state, &news_radar::prompt(&inputs, &flows, false)) {
+            Ok(text) => answer = Some((text, writer.provider(), writer.model())),
+            Err(e) => tried.push(format!("{}: {e}", if writer.provider() == "ollama" { "local model" } else { "Claude" })),
         }
     }
     let Some((reply, provider, model)) = answer else {

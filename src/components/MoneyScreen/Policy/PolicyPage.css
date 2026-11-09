@@ -592,9 +592,10 @@
   width: 100%;
 }
 
+/* A vertical swipe scrolls the page; a sideways drag reads the chart. */
 .lchart svg {
   display: block;
-  touch-action: none;
+  touch-action: pan-y;
 }
 
 .lchart--empty {
@@ -958,4 +959,16 @@
   .policy__glide-step .policy__fit-why {
     grid-column: auto;
   }
+}
+
+/* ── On the phone ─────────────────────────────────────────────────────── */
+/* The fund picker is as wide as its longest fund name; keep it on screen. */
+.phone-shell .policy__add {
+  max-width: 100%;
+}
+
+.phone-shell .policy__add select {
+  min-width: 0;
+  max-width: 100%;
+  padding: 8px 4px;
 }
